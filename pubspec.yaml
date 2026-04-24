@@ -1,0 +1,29 @@
+name: neighbourcharge
+description: A new Flutter project for NeighbourCharge.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  google_maps_flutter: ^2.5.0
+  supabase_flutter: ^2.5.0
+  http: ^1.2.0
+  google_fonts: ^6.2.1
+  image_picker: ^1.0.7
+  url_launcher: ^6.2.5
+  geolocator: ^11.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  
