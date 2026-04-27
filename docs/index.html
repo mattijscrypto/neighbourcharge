@@ -3,14 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pluggo – Deel je laadpaal met de buurt</title>
+  <title>Pluggo — Deel je laadpaal met de buurt</title>
+  <meta name="description" content="Pluggo is het peer-to-peer laadnetwerk voor Nederland. Eigenaars verdienen aan hun privélaadpaal, laders vinden goedkoper laden in de buurt. Live op 1 juni 2026." />
+  <meta property="og:title" content="Pluggo — Deel je laadpaal met de buurt" />
+  <meta property="og:description" content="Het peer-to-peer laadnetwerk voor Nederland. Live op 1 juni 2026." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://pluggoapp.nl" />
   <style>
     :root {
-      --primary: #0B6B3A;
+      --primary: #00A87E;
+      --primary-dark: #0B6B3A;
+      --primary-light: #E8F7F1;
+      --accent: #FFB547;
       --text: #1A1F1C;
       --muted: #5C6B63;
       --border: #E4EBE7;
       --bg: #FAFBFA;
+      --bg-soft: #F2F6F3;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -20,82 +29,778 @@
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       line-height: 1.6;
+      font-size: 17px;
+      -webkit-font-smoothing: antialiased;
     }
-    .container {
-      max-width: 680px;
+    a { color: var(--primary-dark); }
+
+    /* ---------- NAV ---------- */
+    nav {
+      position: sticky;
+      top: 0;
+      background: rgba(250, 251, 250, 0.92);
+      backdrop-filter: saturate(180%) blur(12px);
+      -webkit-backdrop-filter: saturate(180%) blur(12px);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+    .nav-inner {
+      max-width: 1100px;
       margin: 0 auto;
-      padding: 80px 24px;
-      text-align: center;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
-    .logo-mark {
-      width: 72px;
-      height: 72px;
+    .nav-logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .nav-logo .mark {
+      width: 32px;
+      height: 32px;
       background: var(--primary);
-      border-radius: 20px;
+      border-radius: 9px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       color: white;
       font-weight: 700;
-      font-size: 36px;
+      font-size: 18px;
+    }
+    .nav-logo .name {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.01em;
+    }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-weight: 500;
+      margin-left: 24px;
+      font-size: 15px;
+    }
+    .nav-links a:hover { color: var(--text); }
+    @media (max-width: 600px) {
+      .nav-links a:not(.nav-cta) { display: none; }
+    }
+    .nav-cta {
+      background: var(--primary);
+      color: white !important;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 600 !important;
+    }
+
+    /* ---------- HERO ---------- */
+    .hero {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 80px 24px 60px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
       margin-bottom: 24px;
-      box-shadow: 0 10px 30px rgba(11, 107, 58, 0.2);
+    }
+    .badge .dot {
+      width: 8px;
+      height: 8px;
+      background: var(--primary);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
     }
     h1 {
-      font-size: 40px;
-      font-weight: 700;
-      margin: 0 0 12px;
-      letter-spacing: -0.02em;
+      font-size: 56px;
+      font-weight: 800;
+      margin: 0 0 18px;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
     }
-    .tagline {
-      font-size: 18px;
+    h1 .highlight {
+      background: linear-gradient(120deg, var(--primary) 0%, var(--primary-dark) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .lead {
+      font-size: 20px;
       color: var(--muted);
-      margin: 0 0 48px;
+      max-width: 600px;
+      margin: 0 auto 36px;
     }
-    .links {
+    .cta-row {
       display: flex;
       gap: 12px;
       justify-content: center;
       flex-wrap: wrap;
+      margin-bottom: 40px;
     }
-    .link-card {
-      display: block;
-      padding: 16px 24px;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 16px;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 8px 20px rgba(0, 168, 126, 0.25);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 12px 28px rgba(0, 168, 126, 0.32);
+    }
+    .btn-secondary {
+      background: white;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--primary); }
+
+    /* ---------- COUNTDOWN ---------- */
+    .countdown {
+      display: inline-flex;
+      gap: 10px;
+      padding: 16px 22px;
       background: white;
       border: 1px solid var(--border);
-      border-radius: 12px;
-      text-decoration: none;
-      color: var(--text);
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    }
+    .countdown-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 56px;
+    }
+    .countdown-num {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--primary-dark);
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+    .countdown-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-top: 4px;
       font-weight: 600;
-      transition: border-color 0.15s;
     }
-    .link-card:hover {
-      border-color: var(--primary);
+
+    /* ---------- SECTIONS ---------- */
+    section {
+      padding: 80px 24px;
     }
-    footer {
-      margin-top: 64px;
+    .section-inner {
+      max-width: 880px;
+      margin: 0 auto;
+    }
+    .section-narrow {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    h2 {
+      font-size: 36px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin: 0 0 16px;
+      line-height: 1.15;
+    }
+    h2 + .section-lead {
+      font-size: 18px;
+      color: var(--muted);
+      margin: 0 0 40px;
+    }
+    h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+    }
+    .alt-bg { background: var(--bg-soft); }
+
+    /* ---------- STORY ---------- */
+    .story-text p {
+      font-size: 18px;
+      line-height: 1.75;
+      margin-bottom: 20px;
+      color: #2A302D;
+    }
+    .story-text p:first-letter {
+      font-weight: 700;
+    }
+
+    /* ---------- PROBLEM CARDS ---------- */
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    @media (max-width: 720px) {
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+    .card {
+      padding: 28px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+    .card .icon {
+      width: 44px;
+      height: 44px;
+      background: var(--primary-light);
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+    .card p {
+      color: var(--muted);
+      margin: 0;
+    }
+
+    /* ---------- HOW IT WORKS ---------- */
+    .how-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      margin-top: 32px;
+    }
+    @media (max-width: 720px) {
+      .how-grid { grid-template-columns: 1fr; }
+    }
+    .how-col {
+      padding: 32px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+    }
+    .how-col h3 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 22px;
+      margin-bottom: 24px;
+    }
+    .step {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .step:last-child { margin-bottom: 0; }
+    .step-num {
+      flex: 0 0 32px;
+      height: 32px;
+      background: var(--primary);
+      color: white;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .step-body strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+    .step-body span {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    /* ---------- IMPACT ---------- */
+    .impact-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin: 40px 0 32px;
+    }
+    @media (max-width: 720px) {
+      .impact-stats { grid-template-columns: 1fr; }
+    }
+    .stat {
+      text-align: center;
+      padding: 28px 16px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+    .stat-num {
+      font-size: 36px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--primary-dark);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .stat-label {
       color: var(--muted);
       font-size: 14px;
     }
-    footer a {
+    .impact-text p {
+      font-size: 18px;
+      line-height: 1.75;
+      color: #2A302D;
+    }
+    blockquote {
+      border-left: 3px solid var(--primary);
+      padding: 4px 0 4px 20px;
+      margin: 28px 0;
+      font-size: 19px;
+      font-style: italic;
+      color: #2A302D;
+    }
+
+    /* ---------- FAQ ---------- */
+    details {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 22px;
+      margin-bottom: 12px;
+    }
+    details[open] { border-color: var(--primary); }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 16px;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after {
+      content: "+";
+      font-size: 22px;
       color: var(--muted);
+      font-weight: 400;
+    }
+    details[open] summary::after {
+      content: "−";
+      color: var(--primary);
+    }
+    details p {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    /* ---------- FINAL CTA ---------- */
+    .final-cta {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: white;
+      text-align: center;
+      padding: 80px 24px;
+    }
+    .final-cta h2 {
+      color: white;
+      margin-bottom: 12px;
+    }
+    .final-cta p {
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 18px;
+      max-width: 540px;
+      margin: 0 auto 32px;
+    }
+    .final-cta .btn-primary {
+      background: white;
+      color: var(--primary-dark);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+    }
+    .final-cta .btn-secondary {
+      background: transparent;
+      color: white;
+      border-color: rgba(255, 255, 255, 0.4);
+    }
+
+    /* ---------- FOOTER ---------- */
+    footer.site {
+      background: #0F1411;
+      color: #A8B0AC;
+      padding: 48px 24px 32px;
+      text-align: center;
+      font-size: 14px;
+    }
+    footer.site a {
+      color: #A8B0AC;
+      text-decoration: none;
+      margin: 0 12px;
+    }
+    footer.site a:hover { color: white; }
+    footer.site .footer-logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: white;
+      font-weight: 700;
+      margin-bottom: 16px;
+      font-size: 18px;
+    }
+    footer.site .footer-logo .mark {
+      width: 28px;
+      height: 28px;
+      background: var(--primary);
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    footer.site .links {
+      margin: 16px 0;
+    }
+    footer.site .copyright {
+      margin-top: 16px;
+      color: #5C6B63;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="logo-mark">⚡</div>
-    <h1>Pluggo</h1>
-    <p class="tagline">Deel je laadpaal met de buurt.</p>
 
-    <div class="links">
-      <a class="link-card" href="./privacy.html">Privacybeleid</a>
-      <a class="link-card" href="./terms.html">Algemene voorwaarden</a>
+  <nav>
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <span class="mark">⚡</span>
+        <span class="name">Pluggo</span>
+      </a>
+      <div class="nav-links">
+        <a href="#hoe-werkt-het">Hoe werkt het</a>
+        <a href="#impact">Impact</a>
+        <a href="#faq">FAQ</a>
+        <a href="#meedoen" class="nav-cta">Doe mee</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="badge">
+      <span class="dot"></span>
+      App live op 1 juni 2026
+    </div>
+    <h1>Het laadnet van<br/><span class="highlight">de buurt zelf.</span></h1>
+    <p class="lead">
+      Pluggo verbindt buren die een privélaadpaal hebben met buren die een plek zoeken om hun EV op te laden. Eigenaars verdienen, laders besparen, en samen benutten we de infrastructuur die er al staat.
+    </p>
+
+    <div class="cta-row">
+      <a href="#meedoen" class="btn btn-primary">Voeg je paal alvast toe</a>
+      <a href="#hoe-werkt-het" class="btn btn-secondary">Hoe werkt het?</a>
     </div>
 
-    <footer>
-      <p>Vragen? <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a></p>
-    </footer>
-  </div>
+    <div class="countdown" id="countdown">
+      <div class="countdown-item">
+        <span class="countdown-num" id="cd-days">—</span>
+        <span class="countdown-label">Dagen</span>
+      </div>
+      <div class="countdown-item">
+        <span class="countdown-num" id="cd-hours">—</span>
+        <span class="countdown-label">Uur</span>
+      </div>
+      <div class="countdown-item">
+        <span class="countdown-num" id="cd-mins">—</span>
+        <span class="countdown-label">Min</span>
+      </div>
+      <div class="countdown-item">
+        <span class="countdown-num" id="cd-secs">—</span>
+        <span class="countdown-label">Sec</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="alt-bg" id="verhaal">
+    <div class="section-inner section-narrow">
+      <div class="eyebrow">Het verhaal</div>
+      <h2>Een idee dat ontstond op de oprit.</h2>
+      <div class="story-text">
+        <p>
+          Het begon met een observatie. Onze laadpaal stond meer dan twintig uur per dag stil. Onze auto laadde 's nachts vol en daarna zat er enkele tientallen euro's aan elektriciteits-investering in een paal die de rest van de dag niets deed.
+        </p>
+        <p>
+          Tegelijkertijd zagen we de buurman in zijn busje rondrijden, op zoek naar een vrije publieke laadpaal. De wijk was vol palen, maar tijdens piekuren waren ze allemaal bezet. Nieuwe palen plaatsen kost de gemeente tienduizenden euro's per stuk, en de wachttijden lopen op tot meer dan een jaar.
+        </p>
+        <p>
+          De oplossing voelde voor de hand liggend, maar bestond niet. Waarom delen we onze laadpalen niet, net zoals we boormachines lenen, auto's delen of via Airbnb een logeerkamer aanbieden? Bij ons draaide al jaren een Airbnb in de schuur — waarom niet hetzelfde principe op de oprit?
+        </p>
+        <p>
+          <strong>Zo ontstond Pluggo.</strong> Een platform dat private laadpalen toegankelijk maakt voor de buurt — eenvoudig boekbaar, eerlijk geprijsd, zonder dure infrastructuur erbovenop. We bouwen het in Nederland, voor Nederland, samen met de mensen die meedoen.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="probleem">
+    <div class="section-inner">
+      <div class="eyebrow">Het probleem</div>
+      <h2>Volle palen, dure tarieven, en een hoop verspilling.</h2>
+      <p class="section-lead">
+        Nederland telt meer dan 600.000 elektrische auto's en groeit hard door. De infrastructuur loopt achter — terwijl er duizenden privélaadpalen elke dag stilstaan.
+      </p>
+
+      <div class="grid-3">
+        <div class="card">
+          <div class="icon">🔌</div>
+          <h3>Voor laders</h3>
+          <p>Publieke palen zijn 's avonds vaak vol. Snelladers kosten €0,65 of meer per kWh. En een EV met een leeg accu zoeken in onbekend gebied is geen pretje.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🏡</div>
+          <h3>Voor eigenaars</h3>
+          <p>Een privélaadpaal kost al gauw €1.500. Hij wordt vaak maar een paar uur per dag gebruikt. De rest van de tijd: pure stilstand, geen rendement.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🌍</div>
+          <h3>Voor Nederland</h3>
+          <p>Elke nieuwe publieke paal kost gemeentegeld, beton, kabels en jaren wachttijd. Terwijl de capaciteit die er al ligt, voor 80% onbenut blijft.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt-bg" id="hoe-werkt-het">
+    <div class="section-inner">
+      <div class="eyebrow">Hoe werkt het</div>
+      <h2>In drie stappen, voor beide kanten.</h2>
+      <p class="section-lead">
+        Pluggo verbindt eigenaars en laders direct in de buurt. Geen intermediair, geen abonnement — alleen een eerlijke, simpele match.
+      </p>
+
+      <div class="how-grid">
+        <div class="how-col">
+          <h3>🏡 Heb je een paal?</h3>
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>Voeg je paal toe</strong>
+              <span>Adres, foto, prijs per kWh en eventuele instructies — klaar in een paar minuten.</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Stel je beschikbaarheid in</strong>
+              <span>Bepaal zelf wanneer je paal te boeken is. Niet beschikbaar als je auto thuis is? Geen probleem.</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>Ontvang boekingen</strong>
+              <span>Buurtbewoners boeken een tijdslot. Jij krijgt een melding en bevestigt of weigert. €100 tot €200 extra per maand is haalbaar.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="how-col">
+          <h3>🔌 Zoek je een paal?</h3>
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>Vind een paal in de buurt</strong>
+              <span>Zoek op de kaart, filter op prijs of beschikbaarheid, en bekijk reviews van eerdere laders.</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>Boek je tijdslot</strong>
+              <span>Kies een datum en tijd. De eigenaar bevestigt — meestal binnen een paar uur.</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>Laad op en rijd door</strong>
+              <span>Volg de instructies van de eigenaar, plug in, en betaal alleen voor wat je écht hebt geladen — vaak goedkoper dan een publieke paal.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="impact">
+    <div class="section-inner section-narrow">
+      <div class="eyebrow">De toekomst</div>
+      <h2>De grootste laadinfrastructuur staat al in Nederland — we moeten 'm alleen nog ontsluiten.</h2>
+
+      <div class="impact-text">
+        <p>
+          Stel je voor dat in elke straat één of twee buurtgenoten hun paal delen via Pluggo. Een EV-rijder hoeft niet meer naar een snellader buiten de wijk; hij loopt vijftig meter. Iemand zonder eigen oprit, in een appartement, kan toch elektrisch rijden. De gemeente hoeft minder palen te plaatsen. Het stroomnet wordt slimmer benut — vaak al wanneer er overdag overschot is.
+        </p>
+        <p>
+          Maar het idee is groter dan techniek. Deze beweging gaat over <strong>vertrouwen tussen buren</strong>. Over geld dat in de wijk blijft in plaats van naar grote energieconcerns. Over een infrastructuur waar je deelgenoot van bent, in plaats van klant van.
+        </p>
+      </div>
+
+      <div class="impact-stats">
+        <div class="stat">
+          <div class="stat-num">~80%</div>
+          <div class="stat-label">van de tijd staat een privépaal stil</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num">€100–200</div>
+          <div class="stat-label">extra per maand voor eigenaars</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num">30–50%</div>
+          <div class="stat-label">goedkoper dan een snellader</div>
+        </div>
+      </div>
+
+      <blockquote>
+        Als 100.000 Nederlanders hun paal delen, hebben we van de ene op de andere dag het grootste laadnetwerk van het land. Zonder één extra paal in de grond.
+      </blockquote>
+
+      <div class="impact-text">
+        <p>
+          Dat is de toekomst die we voor ons zien. Niet meer beton, niet meer wachttijden, niet meer commerciële tussenpartijen die het tarief opdrijven. Maar een netwerk dat we samen bouwen — paal voor paal, buurt voor buurt.
+        </p>
+        <p>
+          Pluggo is daar pas het begin van. We starten met laden, maar de visie reikt verder: lokale energie-uitwisseling, slim laden op overschotmomenten, en een buurtinfrastructuur waar we trots op kunnen zijn.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt-bg" id="faq">
+    <div class="section-inner section-narrow">
+      <div class="eyebrow">FAQ</div>
+      <h2>Veelgestelde vragen</h2>
+
+      <details>
+        <summary>Wanneer gaat de app live?</summary>
+        <p>Op 1 juni 2026 gaan boekingen open. Tot die tijd kun je de app al downloaden, een account aanmaken en je laadpaal toevoegen, zodat je vanaf dag één klaar bent om boekingen te ontvangen.</p>
+      </details>
+
+      <details>
+        <summary>Wat verdien ik als ik mijn paal deel?</summary>
+        <p>Dat bepaal je zelf. Je stelt je eigen prijs per kWh in. Bij gemiddeld gebruik (een paar laadsessies per week) is €100 tot €200 per maand realistisch. Eigenaars houden alle inkomsten — Pluggo zal in de toekomst een kleine servicefee rekenen, maar transparant en duidelijk gecommuniceerd.</p>
+      </details>
+
+      <details>
+        <summary>Wat kost het voor laders?</summary>
+        <p>Je betaalt alleen voor wat je daadwerkelijk laadt, tegen het tarief dat de eigenaar instelt. In de praktijk vaak 30–50% goedkoper dan een commerciële snellader, en zonder zoek- en wachttijd.</p>
+      </details>
+
+      <details>
+        <summary>Is mijn paal verzekerd tijdens een boeking?</summary>
+        <p>Op dit moment is de overeenkomst direct tussen aanbieder en boeker. Schade dien je onderling te regelen, net als bij een gewone uitleen-situatie. We werken aan een verzekeringsoptie voor een latere versie van de app.</p>
+      </details>
+
+      <details>
+        <summary>Werkt Pluggo op alle laadpalen?</summary>
+        <p>In de basis, ja — elke privélaadpaal met een Type 2-aansluiting (de standaard in Europa) kan op Pluggo. Je hoeft geen "smart" paal te hebben; de boekingen lopen via de app, niet via de paal zelf.</p>
+      </details>
+
+      <details>
+        <summary>Hoe zit het met privacy?</summary>
+        <p>We verwerken alleen wat strikt nodig is om Pluggo te laten werken: account-info, paal-locatie, en boekings-data. Geen advertenties, geen verkoop van data. Lees de details in ons <a href="./privacy.html">privacybeleid</a>.</p>
+      </details>
+
+      <details>
+        <summary>Wie zit er achter Pluggo?</summary>
+        <p>Pluggo is een Nederlandse eenmanszaak, beheerd door Raka Cazander, met ondersteuning van Mattijs Sloothovenier voor de technische ontwikkeling. We bouwen Pluggo bewust klein en lokaal, niet als gefinancierde startup, maar als duurzaam buurtproject. Vragen? Mail <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a>.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="final-cta" id="meedoen">
+    <h2>Doe vanaf het begin mee.</h2>
+    <p>
+      Voeg nu alvast je paal toe of maak een account aan, en wees er klaar voor zodra de eerste boekingen op 1 juni binnenkomen. Hoe meer palen er op dag één staan, hoe sterker we starten.
+    </p>
+    <div class="cta-row">
+      <a href="#" class="btn btn-primary">Download in App Store</a>
+      <a href="#" class="btn btn-secondary">Download in Play Store</a>
+    </div>
+    <p style="margin-top: 24px; font-size: 14px; opacity: 0.7;">App stores volgen binnenkort. Tot die tijd: stuur ons een mail op <a href="mailto:info@pluggoapp.nl" style="color: white;">info@pluggoapp.nl</a> en we houden je op de hoogte.</p>
+  </section>
+
+  <footer class="site">
+    <div class="footer-logo">
+      <span class="mark">⚡</span>
+      <span>Pluggo</span>
+    </div>
+    <div class="links">
+      <a href="./privacy.html">Privacybeleid</a>
+      <a href="./terms.html">Algemene voorwaarden</a>
+      <a href="mailto:info@pluggoapp.nl">Contact</a>
+    </div>
+    <div class="copyright">
+      © 2026 Pluggo · Een handelsnaam van Raka Cazander · Gemaakt in Nederland.
+    </div>
+  </footer>
+
+  <script>
+    // Launch countdown — 1 juni 2026 om 00:00 NL-tijd
+    (function () {
+      const launch = new Date('2026-06-01T00:00:00+02:00').getTime();
+      const els = {
+        days: document.getElementById('cd-days'),
+        hours: document.getElementById('cd-hours'),
+        mins: document.getElementById('cd-mins'),
+        secs: document.getElementById('cd-secs'),
+      };
+      function pad(n) { return n < 10 ? '0' + n : '' + n; }
+      function update() {
+        const diff = launch - Date.now();
+        if (diff <= 0) {
+          els.days.textContent = '0';
+          els.hours.textContent = '00';
+          els.mins.textContent = '00';
+          els.secs.textContent = '00';
+          return;
+        }
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const secs = Math.floor((diff % (1000 * 60)) / 1000);
+        els.days.textContent = days;
+        els.hours.textContent = pad(hours);
+        els.mins.textContent = pad(mins);
+        els.secs.textContent = pad(secs);
+      }
+      update();
+      setInterval(update, 1000);
+    })();
+  </script>
 </body>
 </html>
