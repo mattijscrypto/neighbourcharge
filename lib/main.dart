@@ -22,12 +22,9 @@ const String supabaseAnonKey = 'sb_publishable_6LYdmmkM6efPz5WJzi5tiQ_0qiXqML1';
 // Google Maps API key - dezelfde als in AppDelegate.swift en web/index.html
 const String googleMapsApiKey = 'AIzaSyCLt4pD18cnyedvZnLD6f7XEfRkIy4Dtio';
 
-// Publieke URL's (GitHub Pages) — pas deze aan nadat je Pages hebt aangezet.
-// Voorbeeld-URL: https://<jouw-github-username>.github.io/neighbourcharge/
-const String privacyPolicyUrl =
-    'https://mattijscrypto.github.io/neighbourcharge/privacy.html';
-const String termsOfServiceUrl =
-    'https://mattijscrypto.github.io/neighbourcharge/terms.html';
+// Publieke URL's — gehost op pluggoapp.nl via GitHub Pages custom domain.
+const String privacyPolicyUrl = 'https://pluggoapp.nl/privacy.html';
+const String termsOfServiceUrl = 'https://pluggoapp.nl/terms.html';
 
 // ============================================
 // Launch date — boekingen worden pas mogelijk vanaf deze datum.
