@@ -77,6 +77,87 @@ List<BoxShadow> get softShadow => [
     ];
 
 // ============================================
+// priceFeedback — herbruikbaar widget dat onder een prijs-per-kWh-veld
+// staat en in realtime feedback geeft. Doel: voorkomen dat eigenaars
+// ofwel onder kostprijs (~€0,21) ofwel boven publieke palen (€0,55+)
+// gaan zitten. Groene zone: €0,30 – €0,45.
+// ============================================
+Widget priceFeedback(TextEditingController controller) {
+  return ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) {
+      final raw = controller.text.replaceAll(',', '.').trim();
+      final price = double.tryParse(raw);
+
+      // Statische helper — altijd zichtbaar
+      const helperLine = Padding(
+        padding: EdgeInsets.only(left: 4, top: 8),
+        child: Text(
+          '🟢 Aanbevolen: €0,30 – €0,45  ·  Publiek: €0,40+  ·  Snellader: €0,65+',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      );
+
+      // Dynamische feedback alleen bij geldige input
+      Widget? dynamic_;
+      if (price != null && price > 0) {
+        Color color;
+        IconData icon;
+        String message;
+        if (price < 0.25) {
+          color = AppColors.danger;
+          icon = Icons.warning_amber_rounded;
+          message = 'Je dekt je stroomkosten amper. Weet je het zeker?';
+        } else if (price < 0.30) {
+          color = AppColors.solar;
+          icon = Icons.info_outline;
+          message = 'Onderkant van de markt — veel laders, beperkte marge.';
+        } else if (price <= 0.45) {
+          color = AppColors.primary;
+          icon = Icons.check_circle_outline;
+          message = 'Aantrekkelijk voor laders en gezonde marge voor jou.';
+        } else if (price <= 0.55) {
+          color = AppColors.solar;
+          icon = Icons.info_outline;
+          message = 'Je nadert het publieke paaltarief — overweeg iets lager.';
+        } else {
+          color = AppColors.danger;
+          icon = Icons.warning_amber_rounded;
+          message = 'Hoger dan publieke palen — laders kiezen waarschijnlijk daar.';
+        }
+        dynamic_ = Padding(
+          padding: const EdgeInsets.only(left: 4, top: 6),
+          child: Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          helperLine,
+          if (dynamic_ != null) dynamic_,
+        ],
+      );
+    },
+  );
+}
+
+// ============================================
 // LaunchCountdownBanner — herbruikbare oranje banner die op meerdere
 // plekken in de app uitlegt dat boekingen pas vanaf [bookingsGoLiveAt]
 // open gaan. Toont automatisch niets meer zodra die datum is bereikt.
@@ -2603,7 +2684,7 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
     if (price == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Prijs is geen geldig getal (bijv. 0.21)'),
+          content: Text('Prijs is geen geldig getal (bijv. 0,35)'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -2738,17 +2819,8 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
               hint: 'bijv. Zonnelaan 12, Amersfoort',
               icon: Icons.location_on_outlined,
             ),
-            const SizedBox(height: 20),
-            _label('Prijs per kWh'),
-            _textField(
-              controller: _priceController,
-              hint: 'bijv. 0.21',
-              icon: Icons.euro,
-              keyboardType: TextInputType.number,
-            ),
-            const SizedBox(height: 8),
             const Padding(
-              padding: EdgeInsets.only(left: 4),
+              padding: EdgeInsets.only(left: 4, top: 8),
               child: Row(
                 children: [
                   Icon(Icons.auto_awesome, size: 14, color: AppColors.primary),
@@ -2762,6 +2834,15 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: 20),
+            _label('Prijs per kWh'),
+            _textField(
+              controller: _priceController,
+              hint: 'bijv. 0,35',
+              icon: Icons.euro,
+              keyboardType: TextInputType.number,
+            ),
+            priceFeedback(_priceController),
             const SizedBox(height: 20),
             _label('Type aansluiting'),
             Row(
@@ -3216,7 +3297,7 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
     if (price == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Prijs is geen geldig getal (bijv. 0.21)'),
+          content: Text('Prijs is geen geldig getal (bijv. 0,35)'),
           backgroundColor: AppColors.danger,
         ),
       );
@@ -3435,10 +3516,11 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
             _label('Prijs per kWh'),
             _textField(
               controller: _priceController,
-              hint: 'bijv. 0.21',
+              hint: 'bijv. 0,35',
               icon: Icons.euro,
               keyboardType: TextInputType.number,
             ),
+            priceFeedback(_priceController),
             const SizedBox(height: 20),
             _label('Type aansluiting'),
             Row(
