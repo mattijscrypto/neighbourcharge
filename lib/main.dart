@@ -25,9 +25,33 @@ const String googleMapsApiKey = 'AIzaSyCLt4pD18cnyedvZnLD6f7XEfRkIy4Dtio';
 // Publieke URL's (GitHub Pages) — pas deze aan nadat je Pages hebt aangezet.
 // Voorbeeld-URL: https://<jouw-github-username>.github.io/neighbourcharge/
 const String privacyPolicyUrl =
-    'https://m-sloothovenier.github.io/neighbourcharge/privacy.html';
+    'https://mattijscrypto.github.io/neighbourcharge/privacy.html';
 const String termsOfServiceUrl =
-    'https://m-sloothovenier.github.io/neighbourcharge/terms.html';
+    'https://mattijscrypto.github.io/neighbourcharge/terms.html';
+
+// ============================================
+// Launch date — boekingen worden pas mogelijk vanaf deze datum.
+// Vóór deze datum kunnen mensen wel hun paal toevoegen, hun account
+// aanmaken, en de app verkennen. Iedereen met een account krijgt een
+// melding op de launch dag (zie Supabase scheduled function).
+// Pas deze datum aan als de launch verschuift.
+// ============================================
+final DateTime bookingsGoLiveAt = DateTime(2026, 6, 1);
+bool get bookingsAreLive => !DateTime.now().isBefore(bookingsGoLiveAt);
+// Hoeveel hele dagen tot de launch, in datums (dus niet uren). Op 31 mei
+// staat er "over 1 dag" en op 1 juni "vandaag!", ook al is het 23:59.
+int get daysUntilLaunch {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final launchDay = DateTime(
+    bookingsGoLiveAt.year,
+    bookingsGoLiveAt.month,
+    bookingsGoLiveAt.day,
+  );
+  final diff = launchDay.difference(today).inDays;
+  return diff < 0 ? 0 : diff;
+}
+const String launchDateLabel = '1 juni 2026';
 
 // ============================================
 // Design tokens - centrale plek voor kleuren/styling
@@ -54,6 +78,102 @@ List<BoxShadow> get softShadow => [
         offset: const Offset(0, 4),
       ),
     ];
+
+// ============================================
+// LaunchCountdownBanner — herbruikbare oranje banner die op meerdere
+// plekken in de app uitlegt dat boekingen pas vanaf [bookingsGoLiveAt]
+// open gaan. Toont automatisch niets meer zodra die datum is bereikt.
+// `compact` = kleinere variant zonder uitleg (voor in lijsten),
+// `showAccountHint` = toon de zin "maak nu vast een account aan" (op
+// publieke schermen zoals login/signup waar de gebruiker nog niet ingelogd
+// is). Voor ingelogde gebruikers laten we automatisch een ander berichtje
+// zien dat ze een melding krijgen op de launch-dag.
+// ============================================
+class LaunchCountdownBanner extends StatelessWidget {
+  final bool compact;
+  final bool showAccountHint;
+  const LaunchCountdownBanner({
+    Key? key,
+    this.compact = false,
+    this.showAccountHint = false,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    if (bookingsAreLive) return const SizedBox.shrink();
+    final days = daysUntilLaunch;
+    final loggedIn = Supabase.instance.client.auth.currentUser != null;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppColors.solarSoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.solar.withOpacity(0.45)),
+      ),
+      padding: EdgeInsets.all(compact ? 10 : 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.rocket_launch_rounded,
+                color: AppColors.solar,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Boekingen gaan live op $launchDateLabel',
+                  style: GoogleFonts.inter(
+                    fontSize: compact ? 13 : 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.solar,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  days == 0
+                      ? 'vandaag!'
+                      : (days == 1 ? 'over 1 dag' : 'over $days dagen'),
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (!compact) ...[
+            const SizedBox(height: 6),
+            Text(
+              loggedIn
+                  ? 'Je krijgt automatisch een melding zodra boekingen open gaan. Heb jij zelf een paal? Voeg \'m nu vast toe — vanaf $launchDateLabel kun je gemiddeld €100–200 per maand bijverdienen.'
+                  : (showAccountHint
+                      ? 'Maak nu vast een account aan, dan krijg je een seintje zodra boekingen open gaan op $launchDateLabel.'
+                      : 'Tot die tijd kun je palen verkennen en — als jij er één hebt — die alvast toevoegen.'),
+              style: GoogleFonts.inter(
+                fontSize: 12.5,
+                color: AppColors.textSecondary,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 // Opent een externe URL in de browser (of in-app WebView bij fallback).
 // Gebruikt bij de privacy policy / terms-links.
@@ -130,6 +250,7 @@ class Charger {
   final String description;
   final String instructions;
   final String? ownerId;
+  final String? ownerEmail;
   final List<String> photoUrls;
 
   const Charger({
@@ -144,6 +265,7 @@ class Charger {
     required this.description,
     this.instructions = '',
     this.ownerId,
+    this.ownerEmail,
     this.photoUrls = const [],
   });
 
@@ -168,6 +290,7 @@ class Charger {
       description: map['description'] as String? ?? '',
       instructions: map['instructions'] as String? ?? '',
       ownerId: map['owner_id'] as String?,
+      ownerEmail: map['owner_email'] as String?,
       photoUrls: photos,
     );
   }
@@ -238,6 +361,7 @@ class Booking {
   final String status;
   final String? message;
   final String? userName;
+  final String? userEmail;
   final bool viewedByOwner;
   // Optioneel: charger-info uit een joined query
   final Charger? charger;
@@ -251,6 +375,7 @@ class Booking {
     required this.status,
     this.message,
     this.userName,
+    this.userEmail,
     this.viewedByOwner = false,
     this.charger,
   });
@@ -271,12 +396,215 @@ class Booking {
       status: map['status'] as String,
       message: map['message'] as String?,
       userName: map['user_name'] as String?,
+      userEmail: map['user_email'] as String?,
       viewedByOwner: (map['viewed_by_owner'] as bool?) ?? false,
       charger: charger,
     );
   }
 
   Duration get duration => endTime.difference(startTime);
+}
+
+// Een review die een booker achterlaat na een afgelopen boeking.
+// Bevat sterren voor zowel de paal als de eigenaar, optionele tekst,
+// en een optionele reactie van de eigenaar.
+class Review {
+  final String id;
+  final String bookingId;
+  final String chargerId;
+  final String reviewerId;
+  final String ownerId;
+  final int ratingCharger;
+  final int ratingOwner;
+  final String? comment;
+  final String? ownerReply;
+  final DateTime? ownerRepliedAt;
+  final DateTime createdAt;
+  // Optioneel: naam van de reviewer voor weergave (komt uit een join of metadata)
+  final String? reviewerName;
+
+  const Review({
+    required this.id,
+    required this.bookingId,
+    required this.chargerId,
+    required this.reviewerId,
+    required this.ownerId,
+    required this.ratingCharger,
+    required this.ratingOwner,
+    this.comment,
+    this.ownerReply,
+    this.ownerRepliedAt,
+    required this.createdAt,
+    this.reviewerName,
+  });
+
+  factory Review.fromMap(Map<String, dynamic> map) {
+    return Review(
+      id: map['id'] as String,
+      bookingId: map['booking_id'] as String,
+      chargerId: map['charger_id'] as String,
+      reviewerId: map['reviewer_id'] as String,
+      ownerId: map['owner_id'] as String,
+      ratingCharger: (map['rating_charger'] as num).toInt(),
+      ratingOwner: (map['rating_owner'] as num).toInt(),
+      comment: map['comment'] as String?,
+      ownerReply: map['owner_reply'] as String?,
+      ownerRepliedAt: map['owner_replied_at'] != null
+          ? DateTime.parse(map['owner_replied_at'] as String).toLocal()
+          : null,
+      createdAt: DateTime.parse(map['created_at'] as String).toLocal(),
+      reviewerName: map['reviewer_name'] as String?,
+    );
+  }
+}
+
+// Een review die de eigenaar van een paal achterlaat over de booker
+// na een afgelopen laadsessie. 1 sterren-rating + optioneel commentaar.
+class BookerReview {
+  final String id;
+  final String bookingId;
+  final String chargerId;
+  final String reviewerId; // de eigenaar
+  final String bookerId;
+  final int rating;
+  final String? comment;
+  final String? reviewerName;
+  final DateTime createdAt;
+  // Reactie van de boeker op deze review (optioneel)
+  final String? bookerReply;
+  final DateTime? bookerRepliedAt;
+
+  const BookerReview({
+    required this.id,
+    required this.bookingId,
+    required this.chargerId,
+    required this.reviewerId,
+    required this.bookerId,
+    required this.rating,
+    this.comment,
+    this.reviewerName,
+    required this.createdAt,
+    this.bookerReply,
+    this.bookerRepliedAt,
+  });
+
+  factory BookerReview.fromMap(Map<String, dynamic> map) {
+    return BookerReview(
+      id: map['id'] as String,
+      bookingId: map['booking_id'] as String,
+      chargerId: map['charger_id'] as String,
+      reviewerId: map['reviewer_id'] as String,
+      bookerId: map['booker_id'] as String,
+      rating: (map['rating'] as num).toInt(),
+      comment: map['comment'] as String?,
+      reviewerName: map['reviewer_name'] as String?,
+      createdAt: DateTime.parse(map['created_at'] as String).toLocal(),
+      bookerReply: map['booker_reply'] as String?,
+      bookerRepliedAt: map['booker_replied_at'] != null
+          ? DateTime.parse(map['booker_replied_at'] as String).toLocal()
+          : null,
+    );
+  }
+}
+
+// Een gesprek tussen twee gebruikers (paarwise). user_a < user_b alfabetisch
+// zodat elke combinatie maar één keer voorkomt.
+class Conversation {
+  final String id;
+  final String userAId;
+  final String userBId;
+  final DateTime? lastMessageAt;
+  final String? lastMessagePreview;
+  final String? lastMessageSenderId;
+  final DateTime? lastEmailSentAt;
+  final DateTime createdAt;
+  // Naam van de andere partij (uit join met bookings of metadata)
+  final String? otherUserName;
+  // Aantal ongelezen berichten voor de huidige gebruiker (handmatig berekend)
+  final int unreadCount;
+
+  const Conversation({
+    required this.id,
+    required this.userAId,
+    required this.userBId,
+    this.lastMessageAt,
+    this.lastMessagePreview,
+    this.lastMessageSenderId,
+    this.lastEmailSentAt,
+    required this.createdAt,
+    this.otherUserName,
+    this.unreadCount = 0,
+  });
+
+  // De id van de andere gebruiker (gegeven mijn user-id)
+  String otherUserId(String myId) => userAId == myId ? userBId : userAId;
+
+  factory Conversation.fromMap(Map<String, dynamic> map) {
+    return Conversation(
+      id: map['id'] as String,
+      userAId: map['user_a_id'] as String,
+      userBId: map['user_b_id'] as String,
+      lastMessageAt: map['last_message_at'] != null
+          ? DateTime.parse(map['last_message_at'] as String).toLocal()
+          : null,
+      lastMessagePreview: map['last_message_preview'] as String?,
+      lastMessageSenderId: map['last_message_sender_id'] as String?,
+      lastEmailSentAt: map['last_email_sent_at'] != null
+          ? DateTime.parse(map['last_email_sent_at'] as String).toLocal()
+          : null,
+      createdAt: DateTime.parse(map['created_at'] as String).toLocal(),
+    );
+  }
+
+  Conversation copyWith({String? otherUserName, int? unreadCount}) {
+    return Conversation(
+      id: id,
+      userAId: userAId,
+      userBId: userBId,
+      lastMessageAt: lastMessageAt,
+      lastMessagePreview: lastMessagePreview,
+      lastMessageSenderId: lastMessageSenderId,
+      lastEmailSentAt: lastEmailSentAt,
+      createdAt: createdAt,
+      otherUserName: otherUserName ?? this.otherUserName,
+      unreadCount: unreadCount ?? this.unreadCount,
+    );
+  }
+}
+
+// Een individueel chatbericht binnen een conversation
+class ChatMessage {
+  final String id;
+  final String conversationId;
+  final String senderId;
+  final String? senderName;
+  final String body;
+  final DateTime createdAt;
+  final DateTime? seenAt;
+
+  const ChatMessage({
+    required this.id,
+    required this.conversationId,
+    required this.senderId,
+    this.senderName,
+    required this.body,
+    required this.createdAt,
+    this.seenAt,
+  });
+
+  factory ChatMessage.fromMap(Map<String, dynamic> map) {
+    return ChatMessage(
+      id: map['id'] as String,
+      conversationId: map['conversation_id'] as String,
+      senderId: map['sender_id'] as String,
+      senderName: map['sender_name'] as String?,
+      body: map['body'] as String,
+      createdAt: DateTime.parse(map['created_at'] as String).toLocal(),
+      seenAt: map['seen_at'] != null
+          ? DateTime.parse(map['seen_at'] as String).toLocal()
+          : null,
+    );
+  }
 }
 
 // Helper om een DateTime en TimeOfDay te combineren
@@ -400,12 +728,34 @@ class _HomeScreenState extends State<HomeScreen> {
   static const LatLng _center = LatLng(52.1561, 5.3878);
 
   List<Charger> _chargers = [];
-  Set<Marker> _markers = {};
   bool _loading = true;
   String? _error;
 
+  // Gemiddelde charger-rating per paal (op rating_charger uit reviews tabel)
+  // en aantal reviews. Worden samen met _loadChargers opgehaald.
+  Map<String, double> _ratingByChargerId = {};
+  Map<String, int> _reviewCountByChargerId = {};
+
+  // Zoekbalk: live filteren op naam / adres / beschrijving
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // Map filter chips — MVP: 3 simpele toggles die mét de zoektekst samenwerken
+  bool _filterAvailable = false;
+  bool _filterSolar = false;
+  bool _filterNearby = false;
+
+  // Laatste bekende positie van de gebruiker — nodig voor de "Dichtbij"-filter.
+  // Wordt ingevuld zodra we succesvol Geolocator.getCurrentPosition hebben gedaan.
+  Position? _myPosition;
+  static const double _nearbyRadiusKm = 10.0;
+
   // Aantal ongelezen binnenkomende boekingen (voor rode badge op profielicoon)
   int _unreadIncoming = 0;
+  // Aantal ongelezen ontvangen reviews (zowel als boeker als eigenaar)
+  int _unreadReviews = 0;
+  // Aantal ongelezen chatberichten in alle gesprekken
+  int _unreadMessages = 0;
 
   // Wordt true zodra de user permissie heeft gegeven; dan tonen we de blauwe dot
   bool _showMyLocation = false;
@@ -417,6 +767,84 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadChargers();
     _loadUnreadIncoming();
+    _loadUnreadReviews();
+    _loadUnreadMessages();
+    // Bij elke toetsaanslag direct filteren (MVP-schaal is dit prima)
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text);
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  // Gefilterde lijst op basis van zoekterm. Case-insensitive match op
+  // naam, adres en beschrijving — dat dekt in de praktijk ook stads- en
+  // straatnamen, want die zitten in het adres.
+  List<Charger> get _visibleChargers {
+    final q = _searchQuery.trim().toLowerCase();
+    final me = _myPosition;
+    return _chargers.where((c) {
+      // Tekst-filter
+      if (q.isNotEmpty) {
+        final match = c.name.toLowerCase().contains(q) ||
+            c.address.toLowerCase().contains(q) ||
+            c.description.toLowerCase().contains(q);
+        if (!match) return false;
+      }
+      // Chip: alleen beschikbaar
+      if (_filterAvailable && !c.available) return false;
+      // Chip: alleen zonne-energie
+      if (_filterSolar && !c.solar) return false;
+      // Chip: alleen palen binnen straal van mijn locatie
+      if (_filterNearby && me != null) {
+        final meters = Geolocator.distanceBetween(
+          me.latitude,
+          me.longitude,
+          c.position.latitude,
+          c.position.longitude,
+        );
+        if (meters > _nearbyRadiusKm * 1000) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  /// Handig voor bijv. het filter-icoontje: laat zien hoeveel filters aan staan.
+  int get _activeFilterCount {
+    var n = 0;
+    if (_filterAvailable) n++;
+    if (_filterSolar) n++;
+    if (_filterNearby) n++;
+    return n;
+  }
+
+  // Markers worden live herberekend uit de zichtbare palen, zodat het
+  // kaart-beeld meeloopt met de zoekbalk.
+  Set<Marker> get _visibleMarkers {
+    return _visibleChargers.map((charger) {
+      double hue;
+      if (!charger.available) {
+        hue = BitmapDescriptor.hueRed;
+      } else if (charger.solar) {
+        hue = BitmapDescriptor.hueYellow;
+      } else {
+        hue = 160;
+      }
+      return Marker(
+        markerId: MarkerId(charger.id),
+        position: charger.position,
+        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+        infoWindow: InfoWindow(
+          title: charger.name,
+          snippet: '€${charger.price}/kWh · ${charger.type}',
+        ),
+        onTap: () => _openDetail(charger),
+      );
+    }).toSet();
   }
 
   // Vraagt (indien nodig) toestemming voor locatie en animeert de camera
@@ -466,7 +894,10 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (!mounted) return;
 
-      setState(() => _showMyLocation = true);
+      setState(() {
+        _showMyLocation = true;
+        _myPosition = pos;
+      });
 
       // Stap 4: animeer de camera naar de locatie
       await mapController?.animateCamera(
@@ -491,6 +922,125 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Zet de "Dichtbij"-filter aan of uit. Als hij aan gaat en we hebben
+  /// nog geen locatie, vragen we eerst permissie en halen we de positie op.
+  Future<void> _toggleNearbyFilter() async {
+    // Uit → gewoon uitzetten
+    if (_filterNearby) {
+      setState(() => _filterNearby = false);
+      return;
+    }
+
+    // Aan zetten: zorg dat we een positie hebben
+    if (_myPosition == null) {
+      final serviceOn = await Geolocator.isLocationServiceEnabled();
+      if (!serviceOn) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Zet locatievoorzieningen aan om op afstand te filteren.'),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Zonder locatietoestemming kunnen we de afstandsfilter niet toepassen.'),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+        );
+        if (!mounted) return;
+        setState(() {
+          _myPosition = pos;
+          _showMyLocation = true;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Kon locatie niet ophalen: $e'),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _filterNearby = true);
+  }
+
+  /// Animeer de kaart naar de huidige gefilterde resultaten.
+  /// - 0 treffers: snackbar "Niks gevonden"
+  /// - 1 treffer: inzoomen op die paal (zoom 15)
+  /// - >1 treffer: de kaart zo aanpassen dat alle treffers zichtbaar zijn
+  Future<void> _moveCameraToVisibleResults() async {
+    FocusScope.of(context).unfocus();
+    final results = _visibleChargers;
+    final controller = mapController;
+    if (controller == null) return;
+
+    if (results.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Geen laadpunten gevonden voor deze zoekopdracht'),
+          backgroundColor: AppColors.textPrimary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (results.length == 1) {
+      await controller.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(target: results.first.position, zoom: 15),
+        ),
+      );
+      return;
+    }
+
+    // Meerdere treffers: bereken bounding box
+    double minLat = results.first.position.latitude;
+    double maxLat = results.first.position.latitude;
+    double minLng = results.first.position.longitude;
+    double maxLng = results.first.position.longitude;
+    for (final c in results) {
+      if (c.position.latitude < minLat) minLat = c.position.latitude;
+      if (c.position.latitude > maxLat) maxLat = c.position.latitude;
+      if (c.position.longitude < minLng) minLng = c.position.longitude;
+      if (c.position.longitude > maxLng) maxLng = c.position.longitude;
+    }
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+    await controller.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 60),
+    );
+  }
+
   Future<void> _loadUnreadIncoming() async {
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) return;
@@ -506,6 +1056,67 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (_) {
       // Stil falen: badge blijft op vorige waarde
+    }
+  }
+
+  // Aantal ongelezen reviews ophalen — som van twee queries:
+  // 1) reviews op palen waar ik eigenaar van ben
+  // 2) booker_reviews waar ik de boeker ben
+  Future<void> _loadUnreadReviews() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final asOwner = await supabase
+          .from('reviews')
+          .select('id')
+          .eq('owner_id', userId)
+          .eq('seen_by_recipient', false);
+      final asBooker = await supabase
+          .from('booker_reviews')
+          .select('id')
+          .eq('booker_id', userId)
+          .eq('seen_by_recipient', false);
+      if (!mounted) return;
+      setState(() {
+        _unreadReviews =
+            (asOwner as List).length + (asBooker as List).length;
+      });
+    } catch (_) {
+      // Stil falen: badge blijft op vorige waarde
+    }
+  }
+
+  // Aantal ongelezen chatberichten in al mijn gesprekken
+  Future<void> _loadUnreadMessages() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      // 1) Welke conversations doe ik mee?
+      final convs = await supabase
+          .from('conversations')
+          .select('id')
+          .or('user_a_id.eq.$userId,user_b_id.eq.$userId');
+      final convIds = (convs as List)
+          .map((c) => (c as Map<String, dynamic>)['id'] as String)
+          .toList();
+      if (convIds.isEmpty) {
+        if (!mounted) return;
+        setState(() => _unreadMessages = 0);
+        return;
+      }
+      // 2) Tel ongelezen berichten waarvan ik niet de afzender ben
+      final rows = await supabase
+          .from('messages')
+          .select('id')
+          .inFilter('conversation_id', convIds)
+          .neq('sender_id', userId)
+          .filter('seen_at', 'is', null);
+      if (!mounted) return;
+      setState(() {
+        _unreadMessages = (rows as List).length;
+      });
+    } catch (_) {
+      // Stil falen
     }
   }
 
@@ -525,29 +1136,33 @@ class _HomeScreenState extends State<HomeScreen> {
           .map((row) => Charger.fromMap(row as Map<String, dynamic>))
           .toList();
 
+      // Reviews ophalen om gemiddelde per paal te berekenen.
+      // Niet fataal — bij een fout tonen we gewoon geen sterren.
+      final ratings = <String, double>{};
+      final counts = <String, int>{};
+      try {
+        final reviewRows = await supabase
+            .from('reviews')
+            .select('charger_id, rating_charger');
+        final byCharger = <String, List<int>>{};
+        for (final r in reviewRows as List) {
+          final m = r as Map<String, dynamic>;
+          final cid = m['charger_id'] as String?;
+          final rc = m['rating_charger'];
+          if (cid == null || rc == null) continue;
+          byCharger.putIfAbsent(cid, () => []).add((rc as num).toInt());
+        }
+        byCharger.forEach((cid, list) {
+          if (list.isEmpty) return;
+          ratings[cid] = list.reduce((a, b) => a + b) / list.length;
+          counts[cid] = list.length;
+        });
+      } catch (_) {/* reviews zijn optioneel voor de lijst */}
+
       setState(() {
         _chargers = chargers;
-        _markers = chargers.map((charger) {
-          // Kleur van de marker hangt af van beschikbaarheid en zonnepanelen
-          double hue;
-          if (!charger.available) {
-            hue = BitmapDescriptor.hueRed; // Bezet
-          } else if (charger.solar) {
-            hue = BitmapDescriptor.hueYellow; // Zonne-energie
-          } else {
-            hue = 160; // Custom groen die past bij AppColors.primary
-          }
-          return Marker(
-            markerId: MarkerId(charger.id),
-            position: charger.position,
-            icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-            infoWindow: InfoWindow(
-              title: charger.name,
-              snippet: '€${charger.price}/kWh · ${charger.type}',
-            ),
-            onTap: () => _openDetail(charger),
-          );
-        }).toSet();
+        _ratingByChargerId = ratings;
+        _reviewCountByChargerId = counts;
         _loading = false;
       });
     } catch (e) {
@@ -589,16 +1204,18 @@ class _HomeScreenState extends State<HomeScreen> {
     final fullName =
         user?.userMetadata?['full_name'] as String? ?? 'Gebruiker';
     final email = user?.email ?? '';
+    final avatarUrl = user?.userMetadata?['avatar_url'] as String?;
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         return SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -615,50 +1232,130 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: AppColors.primarySoft,
-                        borderRadius: BorderRadius.circular(16),
+                InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    final updated = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const EditProfileScreen(),
                       ),
-                      child: const Icon(
-                        Icons.person_rounded,
-                        color: AppColors.primary,
-                        size: 26,
-                      ),
+                    );
+                    // Als de naam is bijgewerkt heropenen we de sheet zodat
+                    // de nieuwe naam meteen zichtbaar is.
+                    if (updated == true && mounted) {
+                      setState(() {});
+                      _showProfileSheet();
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 4,
+                      horizontal: 4,
                     ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            fullName,
-                            style: GoogleFonts.inter(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
-                            ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(16),
+                            image: avatarUrl != null
+                                ? DecorationImage(
+                                    image: NetworkImage(avatarUrl),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            email,
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
-                            ),
+                          child: avatarUrl == null
+                              ? const Icon(
+                                  Icons.person_rounded,
+                                  color: AppColors.primary,
+                                  size: 26,
+                                )
+                              : null,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                fullName,
+                                style: GoogleFonts.inter(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                email,
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                        const Icon(
+                          Icons.edit_rounded,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 24),
                 const Divider(height: 1, color: AppColors.divider),
                 const SizedBox(height: 12),
+                InkWell(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const MyChargersScreen(),
+                      ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.ev_station_rounded,
+                          color: AppColors.primary,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Text(
+                          'Mijn paal',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textSecondary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
                 InkWell(
                   onTap: () async {
                     Navigator.pop(ctx);
@@ -757,6 +1454,137 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: AppColors.textPrimary,
                           ),
                         ),
+                        const Spacer(),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textSecondary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                InkWell(
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const MyReviewsScreen(),
+                      ),
+                    );
+                    // Badge opnieuw ophalen zodra je terug bent
+                    _loadUnreadReviews();
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.star_rounded,
+                          color: AppColors.primary,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Text(
+                          'Mijn beoordelingen',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        if (_unreadReviews > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.danger,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$_unreadReviews',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textSecondary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                InkWell(
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ConversationsScreen(),
+                      ),
+                    );
+                    _loadUnreadMessages();
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          color: AppColors.primary,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Text(
+                          'Berichten',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        if (_unreadMessages > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.danger,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$_unreadMessages',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
                         const Spacer(),
                         const Icon(
                           Icons.chevron_right_rounded,
@@ -1056,7 +1884,7 @@ class _HomeScreenState extends State<HomeScreen> {
               target: _center,
               zoom: 13,
             ),
-            markers: _markers,
+            markers: _visibleMarkers,
             // Blauwe dot wordt pas getoond nadat user op de locate-knop tikt
             // en toestemming geeft. Voorkomt dat iOS de permission-popup
             // meteen bij app-start laat zien.
@@ -1092,18 +1920,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () {
                           _loadChargers();
                           _loadUnreadIncoming();
+                          _loadUnreadReviews();
+                          _loadUnreadMessages();
                         },
                       ),
                       const SizedBox(width: 8),
                       _roundIconButton(
                         icon: Icons.person_outline_rounded,
                         onTap: _showProfileSheet,
-                        badgeCount: _unreadIncoming,
+                        badgeCount:
+                            _unreadIncoming + _unreadReviews + _unreadMessages,
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // Zoekbalk met pil-vorm en zachte schaduw
+                  // Zoekbalk met pil-vorm en zachte schaduw — filtert live
                   Container(
                     decoration: BoxDecoration(
                       color: AppColors.surface,
@@ -1111,12 +1942,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       boxShadow: softShadow,
                     ),
                     child: TextField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => _moveCameraToVisibleResults(),
                       style: GoogleFonts.inter(
                         fontSize: 15,
                         color: AppColors.textPrimary,
                       ),
                       decoration: InputDecoration(
-                        hintText: 'Zoek laadpalen in jouw buurt…',
+                        hintText: 'Zoek op naam, adres of stad…',
                         hintStyle: GoogleFonts.inter(
                           fontSize: 15,
                           color: AppColors.textSecondary,
@@ -1125,9 +1959,70 @@ class _HomeScreenState extends State<HomeScreen> {
                           Icons.search_rounded,
                           color: AppColors.primary,
                         ),
+                        // Kruisje alleen zichtbaar zodra er iets getypt is
+                        suffixIcon: _searchQuery.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(
+                                  Icons.close_rounded,
+                                  color: AppColors.textSecondary,
+                                  size: 20,
+                                ),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  FocusScope.of(context).unfocus();
+                                },
+                              ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(vertical: 16),
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // Horizontaal scrollende filter-chips — werken samen met
+                  // de zoekbalk, dus je kunt typen + filters combineren.
+                  SizedBox(
+                    height: 36,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: EdgeInsets.zero,
+                      children: [
+                        _filterChip(
+                          label: 'Beschikbaar',
+                          icon: Icons.check_circle_rounded,
+                          selected: _filterAvailable,
+                          onTap: () => setState(
+                              () => _filterAvailable = !_filterAvailable),
+                        ),
+                        const SizedBox(width: 8),
+                        _filterChip(
+                          label: 'Zonne-energie',
+                          icon: Icons.wb_sunny_rounded,
+                          selected: _filterSolar,
+                          onTap: () =>
+                              setState(() => _filterSolar = !_filterSolar),
+                        ),
+                        const SizedBox(width: 8),
+                        _filterChip(
+                          label: 'Dichtbij (10 km)',
+                          icon: Icons.near_me_rounded,
+                          selected: _filterNearby,
+                          onTap: _toggleNearbyFilter,
+                        ),
+                        if (_activeFilterCount > 0) ...[
+                          const SizedBox(width: 8),
+                          _filterChip(
+                            label: 'Wis filters',
+                            icon: Icons.close_rounded,
+                            selected: false,
+                            onTap: () => setState(() {
+                              _filterAvailable = false;
+                              _filterSolar = false;
+                              _filterNearby = false;
+                            }),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ],
@@ -1195,7 +2090,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
-                                '${_chargers.length}',
+                                '${_visibleChargers.length}',
                                 style: GoogleFonts.inter(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -1207,6 +2102,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    // Pre-launch banner — alleen zichtbaar zolang
+                    // bookingsAreLive == false. Toont aan iedereen die
+                    // de palenlijst opent dat boekingen op 1 juni open gaan.
+                    if (!bookingsAreLive)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                        child: const LaunchCountdownBanner(),
+                      ),
                     Expanded(
                       child: _buildChargerList(scrollController),
                     ),
@@ -1347,6 +2250,49 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Pil-vormige filter-chip onder de zoekbalk. Groene fill als hij aan staat,
+  /// witte kaart-stijl als hij uit staat.
+  Widget _filterChip({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final bg = selected ? AppColors.primary : AppColors.surface;
+    final fg = selected ? Colors.white : AppColors.textPrimary;
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(999),
+      elevation: 0,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: selected ? null : softShadow,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildChargerList(ScrollController scrollController) {
     if (_loading) {
       return const Center(
@@ -1383,6 +2329,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+    // Helemaal geen palen in de database — lege database state
     if (_chargers.isEmpty) {
       return Center(
         child: Padding(
@@ -1427,13 +2374,72 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+
+    // Wel palen, maar filter geeft niks — "geen resultaten" state
+    final visible = _visibleChargers;
+    if (visible.isEmpty) {
+      return SingleChildScrollView(
+        controller: scrollController,
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(
+                Icons.search_off_rounded,
+                color: AppColors.textSecondary,
+                size: 28,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Niks gevonden',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Probeer een andere zoekterm',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () {
+                _searchController.clear();
+                FocusScope.of(context).unfocus();
+              },
+              icon: const Icon(Icons.close_rounded, size: 18),
+              label: const Text('Zoekopdracht wissen'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final currentUserId = supabase.auth.currentUser?.id;
     return ListView.builder(
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-      itemCount: _chargers.length,
+      itemCount: visible.length,
       itemBuilder: (context, index) {
-        final charger = _chargers[index];
+        final charger = visible[index];
         final isOwner =
             charger.ownerId != null && charger.ownerId == currentUserId;
         return _ChargerCard(
@@ -1441,6 +2447,8 @@ class _HomeScreenState extends State<HomeScreen> {
           onTap: () => _openDetail(charger),
           isOwner: isOwner,
           onChanged: _loadChargers,
+          avgRating: _ratingByChargerId[charger.id],
+          reviewCount: _reviewCountByChargerId[charger.id] ?? 0,
         );
       },
     );
@@ -1632,6 +2640,7 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
             'description': _descriptionController.text.trim(),
             'instructions': _instructionsController.text.trim(),
             'owner_id': userId,
+            'owner_email': supabase.auth.currentUser?.email,
           })
           .select()
           .single();
@@ -2263,6 +3272,8 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
         'description': _descriptionController.text.trim(),
         'instructions': _instructionsController.text.trim(),
         'photo_urls': finalPhotoUrls,
+        // Houd owner_email synchroon met huidig account (voor mailnotificaties)
+        'owner_email': supabase.auth.currentUser?.email,
       };
       if (newCoords != null) {
         update['lat'] = newCoords.latitude;
@@ -2791,6 +3802,10 @@ class _DetailScreenState extends State<DetailScreen> {
   List<AvailabilitySlot> _slots = [];
   bool _loadingSlots = true;
 
+  // Reviews voor deze paal — sorteren we van nieuw naar oud bij ophalen.
+  List<Review> _reviews = [];
+  bool _loadingReviews = true;
+
   // De charger wordt lokaal bijgehouden zodat we 'm kunnen updaten na bewerken
   late Charger charger;
 
@@ -2804,6 +3819,39 @@ class _DetailScreenState extends State<DetailScreen> {
     charger = widget.charger;
     _loadSlots();
     _checkBooking();
+    _loadReviews();
+  }
+
+  Future<void> _loadReviews() async {
+    try {
+      final data = await supabase
+          .from('reviews')
+          .select()
+          .eq('charger_id', charger.id)
+          .order('created_at', ascending: false);
+      if (!mounted) return;
+      setState(() {
+        _reviews = (data as List)
+            .map((row) => Review.fromMap(row as Map<String, dynamic>))
+            .toList();
+        _loadingReviews = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingReviews = false);
+    }
+  }
+
+  // Gemiddelden — null als er geen reviews zijn
+  double? get _avgChargerRating {
+    if (_reviews.isEmpty) return null;
+    final sum = _reviews.fold<int>(0, (s, r) => s + r.ratingCharger);
+    return sum / _reviews.length;
+  }
+
+  double? get _avgOwnerRating {
+    if (_reviews.isEmpty) return null;
+    final sum = _reviews.fold<int>(0, (s, r) => s + r.ratingOwner);
+    return sum / _reviews.length;
   }
 
   Future<void> _checkBooking() async {
@@ -2815,7 +3863,7 @@ class _DetailScreenState extends State<DetailScreen> {
           .select('id')
           .eq('charger_id', charger.id)
           .eq('user_id', userId)
-          .neq('status', 'cancelled')
+          .not('status', 'in', '(cancelled,rejected)')
           .limit(1);
       if (!mounted) return;
       setState(() {
@@ -3216,6 +4264,9 @@ class _DetailScreenState extends State<DetailScreen> {
             ],
             // === Beschikbaarheid-sectie ===
             _availabilityCard(),
+            const SizedBox(height: 16),
+            // === Reviews-sectie ===
+            _reviewsCard(),
             const SizedBox(height: 24),
             // === Actie-knop onderaan (verschilt voor eigenaar vs bezoeker) ===
             SizedBox(
@@ -3253,24 +4304,39 @@ class _DetailScreenState extends State<DetailScreen> {
                         ),
                       ],
                     )
-                  : ElevatedButton(
-                      onPressed: charger.available
-                          ? () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      BookingScreen(charger: charger),
-                                ),
-                              );
-                              // Als er een boeking gemaakt is, worden de
-                              // instructies nu zichtbaar.
-                              if (mounted) _checkBooking();
-                            }
-                          : null,
-                      child: Text(
-                        charger.available ? 'Reserveer nu' : 'Momenteel bezet',
-                      ),
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Vóór de launch-datum tonen we de countdown-banner
+                        // boven de knop, en is de knop zelf uitgegrijsd.
+                        if (!bookingsAreLive) ...[
+                          const LaunchCountdownBanner(),
+                          const SizedBox(height: 12),
+                        ],
+                        ElevatedButton(
+                          onPressed: (charger.available && bookingsAreLive)
+                              ? () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          BookingScreen(charger: charger),
+                                    ),
+                                  );
+                                  // Als er een boeking gemaakt is, worden de
+                                  // instructies nu zichtbaar.
+                                  if (mounted) _checkBooking();
+                                }
+                              : null,
+                          child: Text(
+                            !bookingsAreLive
+                                ? 'Boekingen open vanaf $launchDateLabel'
+                                : (charger.available
+                                    ? 'Reserveer nu'
+                                    : 'Momenteel bezet'),
+                          ),
+                        ),
+                      ],
                     ),
             ),
           ],
@@ -3452,6 +4518,385 @@ class _DetailScreenState extends State<DetailScreen> {
                 );
               }),
             ),
+        ],
+      ),
+    );
+  }
+
+  // Statische rij van 5 sterren (read-only) — voor het tonen van een rating.
+  Widget _starsDisplay(int rating, {double size = 16}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (i) {
+        final filled = rating > i;
+        return Padding(
+          padding: const EdgeInsets.only(right: 1),
+          child: Icon(
+            filled ? Icons.star_rounded : Icons.star_outline_rounded,
+            size: size,
+            color: filled ? const Color(0xFFFFC107) : AppColors.divider,
+          ),
+        );
+      }),
+    );
+  }
+
+  // Vraagt eigenaar om reactie en slaat die op via UPDATE.
+  Future<void> _replyToReview(Review review) async {
+    final controller = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Reageer op review'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 4,
+          maxLength: 500,
+          decoration: InputDecoration(
+            hintText: 'Bedankt voor je review!',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Annuleer'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx, controller.text.trim());
+            },
+            child: const Text('Plaatsen'),
+          ),
+        ],
+      ),
+    );
+    if (text == null || text.isEmpty) return;
+
+    try {
+      await supabase.from('reviews').update({
+        'owner_reply': text,
+        'owner_replied_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', review.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reactie geplaatst'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _loadReviews();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon reactie niet plaatsen: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // Kaart met de reviews + gemiddeldes bovenaan.
+  Widget _reviewsCard() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.divider),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.star_rounded,
+                size: 20,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Reviews',
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${_reviews.length}',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (_loadingReviews)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    color: AppColors.primary,
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            )
+          else if (_reviews.isEmpty)
+            Text(
+              'Nog geen reviews. Boekers kunnen na hun laadsessie een review achterlaten.',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.5,
+              ),
+            )
+          else ...[
+            // Gemiddelden bovenaan
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Laadpaal',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.star_rounded,
+                            size: 18,
+                            color: Color(0xFFFFC107),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _avgChargerRating!.toStringAsFixed(1),
+                            style: GoogleFonts.inter(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Eigenaar',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.star_rounded,
+                            size: 18,
+                            color: Color(0xFFFFC107),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _avgOwnerRating!.toStringAsFixed(1),
+                            style: GoogleFonts.inter(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1, color: AppColors.divider),
+            const SizedBox(height: 12),
+            // Lijst reviews
+            ..._reviews.map((r) => _reviewTile(r)).toList(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _reviewTile(Review review) {
+    final dateStr =
+        '${review.createdAt.day} ${_monthNames[review.createdAt.month]} ${review.createdAt.year}';
+    final ownerCanReply = _isOwner && review.ownerReply == null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.person_rounded,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      review.reviewerName ?? 'Buur',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    Text(
+                      dateStr,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Twee mini-rijen: paal-rating + eigenaar-rating
+          Row(
+            children: [
+              Text(
+                'Paal',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              _starsDisplay(review.ratingCharger, size: 14),
+              const SizedBox(width: 14),
+              Text(
+                'Eigenaar',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              _starsDisplay(review.ratingOwner, size: 14),
+            ],
+          ),
+          if (review.comment != null && review.comment!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              review.comment!,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.textPrimary,
+                height: 1.5,
+              ),
+            ),
+          ],
+          // Reactie van eigenaar (indien gegeven)
+          if (review.ownerReply != null && review.ownerReply!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.reply_rounded,
+                        size: 14,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Reactie eigenaar',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    review.ownerReply!,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          // Eigenaar mag reageren (alleen als er nog geen reactie is)
+          if (ownerCanReply) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => _replyToReview(review),
+              icon: const Icon(Icons.reply_rounded, size: 16),
+              label: const Text('Reageer'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                padding: EdgeInsets.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -4106,12 +5551,14 @@ class _BookingScreenState extends State<BookingScreen> {
     setState(() => _submitting = true);
     try {
       // Conflict-check: zoek bestaande boekingen die overlappen met dit tijdvak
-      // Overlap = existing.start < new.end AND existing.end > new.start
+      // Overlap = existing.start < new.end AND existing.end > new.start.
+      // We sluiten geannuleerde en geweigerde boekingen uit — pending +
+      // confirmed blokkeren dus wel een tijdslot.
       final overlapping = await supabase
           .from('bookings')
-          .select('id')
+          .select('id, status')
           .eq('charger_id', widget.charger.id)
-          .neq('status', 'cancelled')
+          .not('status', 'in', '(cancelled,rejected)')
           .lt('start_time', endDT.toUtc().toIso8601String())
           .gt('end_time', startDT.toUtc().toIso8601String());
 
@@ -4137,13 +5584,27 @@ class _BookingScreenState extends State<BookingScreen> {
         'charger_id': widget.charger.id,
         'user_id': userId,
         'user_name': userName,
+        'user_email': user.email, // voor accept/reject mail
         'start_time': startDT.toUtc().toIso8601String(),
         'end_time': endDT.toUtc().toIso8601String(),
-        'status': 'confirmed',
+        // Eigenaar moet aanvragen eerst goedkeuren
+        'status': 'pending',
         'message': _messageController.text.trim().isEmpty
             ? null
             : _messageController.text.trim(),
       });
+
+      // Stuur de eigenaar een mail dat er een nieuwe aanvraag is.
+      // Fire-and-forget: faalt stilletjes als er geen owner_email is.
+      _sendNewRequestEmailToOwner(
+        ownerEmail: widget.charger.ownerEmail,
+        chargerName: widget.charger.name,
+        chargerAddress: widget.charger.address,
+        bookerName: userName,
+        startDT: startDT,
+        endDT: endDT,
+        message: _messageController.text.trim(),
+      );
 
       if (!mounted) return;
       // Succes-scherm tonen
@@ -4177,6 +5638,86 @@ class _BookingScreenState extends State<BookingScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  // ----------------------------------------------------------------
+  // Mail naar eigenaar bij nieuwe aanvraag. Fire-and-forget.
+  // ----------------------------------------------------------------
+  Future<void> _sendNewRequestEmailToOwner({
+    required String? ownerEmail,
+    required String chargerName,
+    required String chargerAddress,
+    required String bookerName,
+    required DateTime startDT,
+    required DateTime endDT,
+    required String message,
+  }) async {
+    if (ownerEmail == null || ownerEmail.isEmpty) return;
+
+    String two(int n) => n.toString().padLeft(2, '0');
+    final weekday = _shortWeekdayNames[startDT.weekday];
+    final month = _monthNames[startDT.month];
+    final datum = '$weekday ${startDT.day} $month';
+    final start = '${two(startDT.hour)}:${two(startDT.minute)}';
+    final eind = '${two(endDT.hour)}:${two(endDT.minute)}';
+
+    final subject = 'Nieuwe boekingsaanvraag voor $chargerName';
+
+    final adresRegel = chargerAddress.isEmpty
+        ? ''
+        : '<tr><td style="padding:6px 0;color:#666;">Adres</td><td style="padding:6px 0;font-weight:500;">$chargerAddress</td></tr>';
+
+    final messageBlok = message.isEmpty
+        ? ''
+        : '''
+<div style="background:#F5F5F5;padding:14px 16px;margin:0 0 24px;border-radius:6px;">
+  <p style="margin:0 0 4px;color:#666;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Bericht van $bookerName</p>
+  <p style="margin:0;color:#222;font-size:14px;font-style:italic;">"$message"</p>
+</div>''';
+
+    final html = '''
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px;">
+    <h1 style="margin:0 0 8px;color:#1976D2;font-size:24px;">Pluggo</h1>
+    <p style="margin:0 0 24px;color:#666;font-size:14px;">Buren laden bij buren</p>
+
+    <h2 style="margin:0 0 16px;font-size:20px;color:#222;">Nieuwe boekingsaanvraag</h2>
+
+    <div style="background:#FFF8E1;border-left:4px solid #F57C00;padding:16px 20px;margin:0 0 24px;border-radius:6px;">
+      <p style="margin:0;color:#E65100;font-size:14px;">$bookerName wil je laadpaal reserveren. Open de Pluggo-app om de aanvraag te accepteren of weigeren.</p>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;font-size:14px;color:#222;margin:0 0 24px;">
+      <tr><td style="padding:6px 0;color:#666;width:90px;">Paal</td><td style="padding:6px 0;font-weight:500;">$chargerName</td></tr>
+      $adresRegel
+      <tr><td style="padding:6px 0;color:#666;">Datum</td><td style="padding:6px 0;font-weight:500;">$datum</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Tijd</td><td style="padding:6px 0;font-weight:500;">$start – $eind</td></tr>
+    </table>
+
+    $messageBlok
+
+    <p style="margin:0 0 8px;color:#444;font-size:14px;">Open de Pluggo-app → tabblad <strong>Inkomend</strong> om te beslissen.</p>
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px;">
+    <p style="margin:0;color:#999;font-size:12px;">Je ontvangt deze mail omdat iemand je laadpaal via Pluggo wil boeken.</p>
+  </div>
+</body>
+</html>
+''';
+
+    try {
+      await supabase.functions.invoke(
+        'send-email',
+        body: {
+          'to': ownerEmail,
+          'subject': subject,
+          'html': html,
+        },
+      );
+    } catch (_) {
+      // best-effort
+    }
   }
 
   @override
@@ -4250,10 +5791,19 @@ class _BookingScreenState extends State<BookingScreen> {
               ),
             ),
             const SizedBox(height: 28),
+            // Vóór de launch-datum: nogmaals de banner + uitgegrijsde knop
+            // (defense-in-depth — normaal kun je hier niet eens komen omdat
+            // de knop op het detailscherm al uitgegrijsd is).
+            if (!bookingsAreLive) ...[
+              const LaunchCountdownBanner(),
+              const SizedBox(height: 16),
+            ],
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _submitting || _loadingSlot ? null : _submit,
+                onPressed: (_submitting || _loadingSlot || !bookingsAreLive)
+                    ? null
+                    : _submit,
                 child: _submitting
                     ? const SizedBox(
                         height: 22,
@@ -4263,7 +5813,11 @@ class _BookingScreenState extends State<BookingScreen> {
                           strokeWidth: 2.5,
                         ),
                       )
-                    : const Text('Bevestig reservering'),
+                    : Text(
+                        bookingsAreLive
+                            ? 'Bevestig reservering'
+                            : 'Boekingen open vanaf $launchDateLabel',
+                      ),
               ),
             ),
           ],
@@ -4593,14 +6147,14 @@ class _BookingSuccessDialog extends StatelessWidget {
                 borderRadius: BorderRadius.circular(36),
               ),
               child: const Icon(
-                Icons.check_rounded,
+                Icons.hourglass_top_rounded,
                 color: AppColors.primary,
                 size: 40,
               ),
             ),
             const SizedBox(height: 16),
             Text(
-              'Gereserveerd!',
+              'Aanvraag verstuurd!',
               style: GoogleFonts.inter(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
@@ -4609,7 +6163,7 @@ class _BookingSuccessDialog extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '${charger.name}\n${date.day} ${_monthNames[date.month]} · ${_formatTimeForDisplay(start)}–${_formatTimeForDisplay(end)}',
+              'De eigenaar moet je aanvraag nog goedkeuren. Je krijgt bericht zodra dat is gebeurd.\n\n${charger.name}\n${date.day} ${_monthNames[date.month]} · ${_formatTimeForDisplay(start)}–${_formatTimeForDisplay(end)}',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 14,
@@ -4633,6 +6187,316 @@ class _BookingSuccessDialog extends StatelessWidget {
 }
 
 // ============================================
+// MyChargersScreen — overzicht van alle palen van de ingelogde gebruiker.
+// Tikken op een paal opent het detailscherm. Bovenaan een knop om snel
+// een nieuwe paal toe te voegen.
+// ============================================
+class MyChargersScreen extends StatefulWidget {
+  const MyChargersScreen({Key? key}) : super(key: key);
+
+  @override
+  State<MyChargersScreen> createState() => _MyChargersScreenState();
+}
+
+class _MyChargersScreenState extends State<MyChargersScreen> {
+  bool _loading = true;
+  List<Charger> _chargers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      final data = await supabase
+          .from('chargers')
+          .select()
+          .eq('owner_id', userId)
+          .order('created_at', ascending: false);
+      final list = (data as List)
+          .map((m) => Charger.fromMap(m as Map<String, dynamic>))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _chargers = list;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon palen niet laden: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openDetail(Charger c) async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => DetailScreen(charger: c)),
+    );
+    // Als de paal aangepast of verwijderd is, lijst verversen
+    if (changed == true) _load();
+  }
+
+  Future<void> _openAdd() async {
+    final added = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const AddChargerScreen()),
+    );
+    if (added == true) _load();
+  }
+
+  Widget _chargerTile(Charger c) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: softShadow,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _openDetail(c),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              // Foto óf icoon-fallback
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(14),
+                  image: c.photoUrls.isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(c.photoUrls.first),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child: c.photoUrls.isEmpty
+                    ? const Icon(
+                        Icons.ev_station_rounded,
+                        color: AppColors.primary,
+                        size: 28,
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      c.name,
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      c.address,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: c.available
+                                ? AppColors.primary.withOpacity(0.12)
+                                : AppColors.divider,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            c.available ? 'Beschikbaar' : 'Niet beschikbaar',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: c.available
+                                  ? AppColors.primary
+                                  : AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        if (c.solar) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFC107).withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.wb_sunny_rounded,
+                                  size: 11,
+                                  color: Color(0xFFB78900),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'Zon',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFFB78900),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.textSecondary,
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Icon(
+                Icons.ev_station_rounded,
+                size: 40,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Nog geen palen',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Voeg je laadpaal toe en deel hem met je buren.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _openAdd,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Voeg paal toe'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('Mijn paal'),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        foregroundColor: AppColors.textPrimary,
+        actions: [
+          if (!_loading && _chargers.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.add_rounded),
+              tooltip: 'Voeg paal toe',
+              onPressed: _openAdd,
+            ),
+        ],
+      ),
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            )
+          : _chargers.isEmpty
+              ? _emptyState()
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  color: AppColors.primary,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    children: _chargers.map(_chargerTile).toList(),
+                  ),
+                ),
+    );
+  }
+}
+
+// ============================================
 // MyBookingsScreen - lijst met boekingen van de ingelogde gebruiker
 // ============================================
 class MyBookingsScreen extends StatefulWidget {
@@ -4645,6 +6509,9 @@ class MyBookingsScreen extends StatefulWidget {
 class _MyBookingsScreenState extends State<MyBookingsScreen> {
   List<Booking> _bookings = [];
   bool _loading = true;
+  // IDs van boekingen waar deze gebruiker al een review voor heeft achtergelaten —
+  // gebruikt om "Schrijf review" vs. "Beoordeeld" badge te bepalen.
+  Set<String> _reviewedBookingIds = {};
 
   @override
   void initState() {
@@ -4664,11 +6531,21 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
           .eq('user_id', userId)
           .order('start_time', ascending: true);
 
+      // Reviews die deze gebruiker al heeft achtergelaten (alleen booking_id nodig)
+      final reviewRows = await supabase
+          .from('reviews')
+          .select('booking_id')
+          .eq('reviewer_id', userId);
+      final reviewedIds = (reviewRows as List)
+          .map((r) => (r as Map<String, dynamic>)['booking_id'] as String)
+          .toSet();
+
       if (!mounted) return;
       setState(() {
         _bookings = (data as List)
             .map((row) => Booking.fromMap(row as Map<String, dynamic>))
             .toList();
+        _reviewedBookingIds = reviewedIds;
         _loading = false;
       });
     } catch (e) {
@@ -4800,13 +6677,22 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
     final now = DateTime.now();
     final isPast = booking.endTime.isBefore(now);
     final isCancelled = booking.status == 'cancelled';
-    final isUpcoming = !isPast && !isCancelled;
+    final isRejected = booking.status == 'rejected';
+    final isPending = booking.status == 'pending';
+    final isUpcoming =
+        !isPast && !isCancelled && !isRejected && !isPending;
 
     Color accent;
     String label;
     if (isCancelled) {
       accent = AppColors.danger;
       label = 'Geannuleerd';
+    } else if (isRejected) {
+      accent = AppColors.danger;
+      label = 'Geweigerd';
+    } else if (isPending) {
+      accent = const Color(0xFFE0A030); // amber/oranje
+      label = 'In afwachting';
     } else if (isPast) {
       accent = AppColors.textSecondary;
       label = 'Afgelopen';
@@ -4909,14 +6795,48 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                 ),
               ],
             ),
-            if (isUpcoming) ...[
+            // Bericht aan de eigenaar — altijd zichtbaar (ook na annuleren),
+            // zodat boeker en eigenaar over en weer kunnen communiceren.
+            if (charger?.ownerId != null) ...[
               const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ChatScreen(
+                          otherUserId: charger!.ownerId!,
+                          otherUserName:
+                              'Eigenaar ${charger.name}',
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline_rounded,
+                      size: 16),
+                  label: const Text('Bericht aan eigenaar'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    textStyle: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            // Annuleer-knop tonen voor toekomstige bevestigde of nog
+            // openstaande aanvragen — niet voor afgelopen/al geannuleerde
+            // of geweigerde boekingen.
+            if ((isUpcoming || isPending) && !isPast) ...[
+              const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: () => _cancel(booking),
                   icon: const Icon(Icons.close_rounded, size: 16),
-                  label: const Text('Annuleren'),
+                  label: Text(isPending ? 'Aanvraag intrekken' : 'Annuleren'),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.danger,
                     textStyle: GoogleFonts.inter(
@@ -4927,7 +6847,1588 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                 ),
               ),
             ],
+            // Afgelopen + bevestigd → review actie tonen
+            // (geen review op geannuleerd of geweigerd of pending)
+            if (isPast && booking.status == 'confirmed') ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _reviewedBookingIds.contains(booking.id)
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySoft,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.check_circle_rounded,
+                              size: 14,
+                              color: AppColors.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Beoordeeld',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : TextButton.icon(
+                        onPressed: () async {
+                          final result = await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  WriteReviewScreen(booking: booking),
+                            ),
+                          );
+                          if (result == true) _load();
+                        },
+                        icon: const Icon(Icons.star_rounded, size: 16),
+                        label: const Text('Schrijf review'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          textStyle: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// PROFIEL BEWERKEN — naam aanpassen in user_metadata
+// ============================================================================
+class EditProfileScreen extends StatefulWidget {
+  const EditProfileScreen({Key? key}) : super(key: key);
+
+  @override
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  bool _saving = false;
+
+  // Huidige avatar-URL uit user_metadata (kan null zijn als niet gezet)
+  String? _currentAvatarUrl;
+  // Net geselecteerde foto die nog moet worden geüpload
+  XFile? _pickedAvatar;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = supabase.auth.currentUser;
+    final meta = user?.userMetadata;
+    _nameController = TextEditingController(
+      text: (meta?['full_name'] as String?) ?? '',
+    );
+    _currentAvatarUrl = meta?['avatar_url'] as String?;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+    setState(() => _pickedAvatar = picked);
+  }
+
+  /// Uploadt de gekozen foto naar bucket `avatars` onder pad `{userId}/avatar.{ext}`.
+  /// Returnt de publieke URL (met cachebuster zodat de app de nieuwe foto ziet).
+  Future<String> _uploadAvatar(XFile file, String userId) async {
+    final bytes = await file.readAsBytes();
+    final ext = file.name.contains('.')
+        ? file.name.split('.').last.toLowerCase()
+        : 'jpg';
+    final path = '$userId/avatar.$ext';
+    await supabase.storage.from('avatars').uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(
+            contentType: 'image/$ext',
+            upsert: true,
+          ),
+        );
+    final url = supabase.storage.from('avatars').getPublicUrl(path);
+    // Cachebuster: voorkomt dat oude cache-versie van de avatar blijft hangen
+    return '$url?v=${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) throw 'Niet ingelogd';
+
+      String? avatarUrl = _currentAvatarUrl;
+      if (_pickedAvatar != null) {
+        avatarUrl = await _uploadAvatar(_pickedAvatar!, userId);
+      }
+
+      final newName = _nameController.text.trim();
+      await supabase.auth.updateUser(
+        UserAttributes(
+          data: {
+            'full_name': newName,
+            if (avatarUrl != null) 'avatar_url': avatarUrl,
+          },
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profiel bijgewerkt'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon profiel niet opslaan: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = supabase.auth.currentUser;
+    final email = user?.email ?? '';
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('Profiel bewerken'),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Avatar — tapbaar om te veranderen
+                Center(
+                  child: Stack(
+                    children: [
+                      GestureDetector(
+                        onTap: _pickAvatar,
+                        child: Container(
+                          width: 96,
+                          height: 96,
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(28),
+                            image: _pickedAvatar != null
+                                ? DecorationImage(
+                                    image: FileImage(File(_pickedAvatar!.path)),
+                                    fit: BoxFit.cover,
+                                  )
+                                : (_currentAvatarUrl != null
+                                    ? DecorationImage(
+                                        image:
+                                            NetworkImage(_currentAvatarUrl!),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : null),
+                          ),
+                          child: (_pickedAvatar == null &&
+                                  _currentAvatarUrl == null)
+                              ? const Icon(
+                                  Icons.person_rounded,
+                                  color: AppColors.primary,
+                                  size: 44,
+                                )
+                              : null,
+                        ),
+                      ),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: GestureDetector(
+                          onTap: _pickAvatar,
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(16),
+                              border:
+                                  Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28),
+                // Naam
+                Text(
+                  'Naam',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _nameController,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: InputDecoration(
+                    hintText: 'Jouw volledige naam',
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                  validator: (value) {
+                    final v = (value ?? '').trim();
+                    if (v.isEmpty) return 'Vul je naam in';
+                    if (v.length < 2) return 'Minimaal 2 tekens';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                // E-mail (read-only)
+                Text(
+                  'E-mailadres',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.divider),
+                  ),
+                  child: Text(
+                    email,
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Je e-mailadres kun je momenteel niet zelf wijzigen.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                // Opslaan
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _saving ? null : _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2.5,
+                            ),
+                          )
+                        : Text(
+                            'Opslaan',
+                            style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// MIJN BEOORDELINGEN — alle reviews die over jou gaan, in één scherm
+// Twee secties: ontvangen als boeker (uit booker_reviews) en als eigenaar
+// (uit reviews op palen die je bezit). Markeert ongelezen reviews als gezien
+// zodra het scherm opent.
+// ============================================================================
+class MyReviewsScreen extends StatefulWidget {
+  const MyReviewsScreen({Key? key}) : super(key: key);
+
+  @override
+  State<MyReviewsScreen> createState() => _MyReviewsScreenState();
+}
+
+class _MyReviewsScreenState extends State<MyReviewsScreen> {
+  bool _loading = true;
+  // Reviews die door boekers over mijn palen / mij als eigenaar zijn geschreven
+  List<Review> _ownerReviews = [];
+  // Naast elke review: de naam van de paal (om context te tonen)
+  Map<String, String> _chargerNamesById = {};
+  // Booker reviews die door eigenaren over mij zijn geschreven
+  List<BookerReview> _bookerReviews = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      // 1) Reviews op mijn palen (ik ben eigenaar). We voegen meteen een join
+      //    op chargers toe om de paal-naam te kunnen tonen.
+      final ownerRows = await supabase
+          .from('reviews')
+          .select('*, chargers(name)')
+          .eq('owner_id', userId)
+          .order('created_at', ascending: false);
+      final ownerList = <Review>[];
+      final names = <String, String>{};
+      for (final raw in ownerRows as List) {
+        final m = raw as Map<String, dynamic>;
+        ownerList.add(Review.fromMap(m));
+        final ch = m['chargers'];
+        if (ch is Map<String, dynamic>) {
+          final n = ch['name'] as String?;
+          if (n != null) names[m['charger_id'] as String] = n;
+        }
+      }
+
+      // 2) Booker reviews waar ik de boeker ben.
+      final bookerRows = await supabase
+          .from('booker_reviews')
+          .select()
+          .eq('booker_id', userId)
+          .order('created_at', ascending: false);
+      final bookerList = (bookerRows as List)
+          .map((r) => BookerReview.fromMap(r as Map<String, dynamic>))
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _ownerReviews = ownerList;
+        _chargerNamesById = names;
+        _bookerReviews = bookerList;
+        _loading = false;
+      });
+
+      // 3) Markeer alle ongelezen reviews als gezien — fire-and-forget,
+      //    een fout hier mag het scherm niet blokkeren.
+      _markAsSeen(userId);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon beoordelingen niet laden: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _markAsSeen(String userId) async {
+    try {
+      await supabase
+          .from('reviews')
+          .update({'seen_by_recipient': true})
+          .eq('owner_id', userId)
+          .eq('seen_by_recipient', false);
+    } catch (_) {/* niet fataal */}
+    try {
+      await supabase
+          .from('booker_reviews')
+          .update({'seen_by_recipient': true})
+          .eq('booker_id', userId)
+          .eq('seen_by_recipient', false);
+    } catch (_) {/* niet fataal */}
+  }
+
+  // Gemiddelde van een lijst getallen, of null bij lege lijst
+  double? _avg(List<num> values) {
+    if (values.isEmpty) return null;
+    final sum = values.fold<num>(0, (a, b) => a + b);
+    return sum / values.length;
+  }
+
+  Widget _starsRow(double rating, {double size = 16}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (i) {
+        final n = i + 1;
+        IconData icon;
+        if (rating >= n) {
+          icon = Icons.star_rounded;
+        } else if (rating >= n - 0.5) {
+          icon = Icons.star_half_rounded;
+        } else {
+          icon = Icons.star_outline_rounded;
+        }
+        return Icon(icon, size: size, color: const Color(0xFFFFC107));
+      }),
+    );
+  }
+
+  String _formatDate(DateTime dt) {
+    final month = _monthNames[dt.month];
+    return '${dt.day} $month ${dt.year}';
+  }
+
+  Widget _avgHeader({
+    required String title,
+    required int count,
+    double? avgPrimary,
+    String? primaryLabel,
+    double? avgSecondary,
+    String? secondaryLabel,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (count == 0)
+            Text(
+              'Nog geen beoordelingen',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+            )
+          else
+            Wrap(
+              spacing: 16,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (avgPrimary != null)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _starsRow(avgPrimary, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${avgPrimary.toStringAsFixed(1)} ${primaryLabel ?? ''}'
+                            .trim(),
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                if (avgSecondary != null)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _starsRow(avgSecondary, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${avgSecondary.toStringAsFixed(1)} ${secondaryLabel ?? ''}'
+                            .trim(),
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                Text(
+                  '$count beoordelingen',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _ownerReviewTile(Review r) {
+    final reviewer = (r.reviewerName?.trim().isNotEmpty ?? false)
+        ? r.reviewerName!
+        : 'Anoniem';
+    final chargerName = _chargerNamesById[r.chargerId] ?? 'Laadpaal';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: softShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      reviewer,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Over $chargerName · ${_formatDate(r.createdAt)}',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              SizedBox(
+                width: 80,
+                child: Text(
+                  'Paal',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              _starsRow(r.ratingCharger.toDouble()),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              SizedBox(
+                width: 80,
+                child: Text(
+                  'Eigenaar',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              _starsRow(r.ratingOwner.toDouble()),
+            ],
+          ),
+          if (r.comment != null && r.comment!.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              r.comment!,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.textPrimary,
+                height: 1.4,
+              ),
+            ),
+          ],
+          if (r.ownerReply != null && r.ownerReply!.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Jouw reactie',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    r.ownerReply!,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _bookerReviewTile(BookerReview r) {
+    final reviewer = (r.reviewerName?.trim().isNotEmpty ?? false)
+        ? r.reviewerName!
+        : 'Eigenaar';
+    final hasReply = r.bookerReply != null && r.bookerReply!.trim().isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: softShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      reviewer,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatDate(r.createdAt),
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _starsRow(r.rating.toDouble(), size: 18),
+            ],
+          ),
+          if (r.comment != null && r.comment!.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              r.comment!,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.textPrimary,
+                height: 1.4,
+              ),
+            ),
+          ],
+          // Reactie van de boeker (als die er is) of een knop om te reageren
+          if (hasReply) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Jouw reactie',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const Spacer(),
+                      InkWell(
+                        onTap: () => _replyToBookerReview(r),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.edit_rounded,
+                                size: 12,
+                                color: AppColors.primary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Bewerk',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    r.bookerReply!,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _replyToBookerReview(r),
+                icon: const Icon(Icons.reply_rounded, size: 16),
+                label: const Text('Reageer'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  textStyle: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Boeker plaatst of bewerkt een reactie op een booker_review die over hem gaat
+  Future<void> _replyToBookerReview(BookerReview r) async {
+    final controller = TextEditingController(text: r.bookerReply ?? '');
+    final isEditing =
+        r.bookerReply != null && r.bookerReply!.trim().isNotEmpty;
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(isEditing ? 'Bewerk reactie' : 'Reageer op beoordeling'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 4,
+          maxLength: 500,
+          decoration: InputDecoration(
+            hintText: 'Bedankt voor de beoordeling!',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Annuleer'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx, controller.text.trim());
+            },
+            child: Text(isEditing ? 'Opslaan' : 'Plaatsen'),
+          ),
+        ],
+      ),
+    );
+    if (text == null || text.isEmpty) return;
+
+    try {
+      await supabase.from('booker_reviews').update({
+        'booker_reply': text,
+        'booker_replied_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', r.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isEditing ? 'Reactie bijgewerkt' : 'Reactie geplaatst'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon reactie niet plaatsen: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Icon(
+                Icons.star_outline_rounded,
+                size: 40,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Nog geen beoordelingen',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Zodra iemand jou of een van je palen beoordeelt, verschijnt dat hier.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ownerCount = _ownerReviews.length;
+    final bookerCount = _bookerReviews.length;
+    final avgCharger = _avg(
+      _ownerReviews.map<num>((r) => r.ratingCharger).toList(),
+    );
+    final avgOwner = _avg(
+      _ownerReviews.map<num>((r) => r.ratingOwner).toList(),
+    );
+    final avgBooker = _avg(
+      _bookerReviews.map<num>((r) => r.rating).toList(),
+    );
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('Mijn beoordelingen'),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        foregroundColor: AppColors.textPrimary,
+      ),
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            )
+          : (ownerCount == 0 && bookerCount == 0)
+              ? _emptyState()
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  color: AppColors.primary,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    children: [
+                      // ─── Sectie 1: ontvangen als boeker ──────────────
+                      _avgHeader(
+                        title: 'ALS BOEKER ONTVANGEN',
+                        count: bookerCount,
+                        avgPrimary: avgBooker,
+                      ),
+                      ..._bookerReviews.map(_bookerReviewTile),
+                      const SizedBox(height: 16),
+                      // ─── Sectie 2: ontvangen als eigenaar ────────────
+                      _avgHeader(
+                        title: 'ALS EIGENAAR ONTVANGEN',
+                        count: ownerCount,
+                        avgPrimary: avgCharger,
+                        primaryLabel: 'paal',
+                        avgSecondary: avgOwner,
+                        secondaryLabel: 'eigenaar',
+                      ),
+                      ..._ownerReviews.map(_ownerReviewTile),
+                    ],
+                  ),
+                ),
+    );
+  }
+}
+
+// ============================================================================
+// REVIEW SCHRIJVEN — sterren voor paal + eigenaar, optioneel commentaar
+// ============================================================================
+class WriteReviewScreen extends StatefulWidget {
+  final Booking booking;
+  const WriteReviewScreen({Key? key, required this.booking}) : super(key: key);
+
+  @override
+  State<WriteReviewScreen> createState() => _WriteReviewScreenState();
+}
+
+class _WriteReviewScreenState extends State<WriteReviewScreen> {
+  int _ratingCharger = 0;
+  int _ratingOwner = 0;
+  final TextEditingController _commentController = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_ratingCharger == 0 || _ratingOwner == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Geef voor zowel de paal als de eigenaar een aantal sterren.'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final charger = widget.booking.charger;
+    final ownerId = charger?.ownerId;
+    if (charger == null || ownerId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kan paalgegevens niet vinden — probeer opnieuw.'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final user = supabase.auth.currentUser;
+      final userId = user?.id;
+      final commentText = _commentController.text.trim();
+      // Snapshotten van de naam, zodat een latere naamwijziging
+      // oude reviews niet verandert.
+      final reviewerName =
+          (user?.userMetadata?['full_name'] as String?)?.trim();
+      await supabase.from('reviews').insert({
+        'booking_id': widget.booking.id,
+        'charger_id': widget.booking.chargerId,
+        'reviewer_id': userId,
+        'owner_id': ownerId,
+        'rating_charger': _ratingCharger,
+        'rating_owner': _ratingOwner,
+        if (commentText.isNotEmpty) 'comment': commentText,
+        if (reviewerName != null && reviewerName.isNotEmpty)
+          'reviewer_name': reviewerName,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bedankt voor je review!'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      // Foutmelding korter maken — DB-errors zijn technisch
+      var msg = e.toString();
+      if (msg.contains('duplicate') || msg.contains('unique')) {
+        msg = 'Je hebt deze boeking al beoordeeld.';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// Een rij van 5 tikbare sterren voor één rating-categorie.
+  Widget _starRow({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: List.generate(5, (i) {
+            final n = i + 1;
+            final filled = value >= n;
+            return GestureDetector(
+              onTap: () => onChanged(n),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                  size: 36,
+                  color: filled
+                      ? const Color(0xFFFFC107)
+                      : AppColors.textSecondary,
+                ),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final charger = widget.booking.charger;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('Schrijf review'),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Charger-card bovenaan ter herinnering welke paal het is
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.ev_station_rounded,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            charger?.name ?? 'Laadpaal',
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          if (charger != null)
+                            Text(
+                              charger.address,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
+              _starRow(
+                label: 'De laadpaal',
+                value: _ratingCharger,
+                onChanged: (n) => setState(() => _ratingCharger = n),
+              ),
+              const SizedBox(height: 24),
+              _starRow(
+                label: 'De eigenaar',
+                value: _ratingOwner,
+                onChanged: (n) => setState(() => _ratingOwner = n),
+              ),
+              const SizedBox(height: 28),
+              Text(
+                'Commentaar (optioneel)',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _commentController,
+                maxLines: 4,
+                maxLength: 500,
+                decoration: InputDecoration(
+                  hintText: 'Hoe ging het laden? Wat zou je je buur willen meegeven?',
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.all(14),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : Text(
+                          'Plaats review',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// WRITE BOOKER REVIEW — eigenaar beoordeelt de boeker na een afgelopen sessie
+// ============================================================================
+class WriteBookerReviewScreen extends StatefulWidget {
+  final Booking booking;
+  const WriteBookerReviewScreen({Key? key, required this.booking})
+      : super(key: key);
+
+  @override
+  State<WriteBookerReviewScreen> createState() =>
+      _WriteBookerReviewScreenState();
+}
+
+class _WriteBookerReviewScreenState extends State<WriteBookerReviewScreen> {
+  int _rating = 0;
+  final TextEditingController _commentController = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_rating == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Geef de boeker een aantal sterren.'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final charger = widget.booking.charger;
+    final bookerId = widget.booking.userId;
+    if (charger == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kan paalgegevens niet vinden — probeer opnieuw.'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final user = supabase.auth.currentUser;
+      final userId = user?.id;
+      final commentText = _commentController.text.trim();
+      // Snapshot van de naam zodat een latere naamwijziging
+      // oude reviews niet verandert.
+      final reviewerName =
+          (user?.userMetadata?['full_name'] as String?)?.trim();
+      await supabase.from('booker_reviews').insert({
+        'booking_id': widget.booking.id,
+        'charger_id': widget.booking.chargerId,
+        'reviewer_id': userId,
+        'booker_id': bookerId,
+        'rating': _rating,
+        if (commentText.isNotEmpty) 'comment': commentText,
+        if (reviewerName != null && reviewerName.isNotEmpty)
+          'reviewer_name': reviewerName,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bedankt voor je beoordeling!'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      var msg = e.toString();
+      if (msg.contains('duplicate') || msg.contains('unique')) {
+        msg = 'Je hebt deze boeking al beoordeeld.';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _starRow({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: List.generate(5, (i) {
+            final n = i + 1;
+            final filled = value >= n;
+            return GestureDetector(
+              onTap: () => onChanged(n),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                  size: 36,
+                  color: filled
+                      ? const Color(0xFFFFC107)
+                      : AppColors.textSecondary,
+                ),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bookerName = widget.booking.userName ?? 'Boeker';
+    final charger = widget.booking.charger;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text('Beoordeel boeker'),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Booker-card bovenaan ter herinnering wie het was
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.person_rounded,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            bookerName,
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          if (charger != null)
+                            Text(
+                              'Laadde bij ${charger.name}',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
+              _starRow(
+                label: 'Hoe was deze boeker?',
+                value: _rating,
+                onChanged: (n) => setState(() => _rating = n),
+              ),
+              const SizedBox(height: 28),
+              Text(
+                'Commentaar (optioneel)',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _commentController,
+                maxLines: 4,
+                maxLength: 500,
+                decoration: InputDecoration(
+                  hintText:
+                      'Was de boeker netjes, op tijd, communicatief?',
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.all(14),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : Text(
+                          'Plaats beoordeling',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -4947,6 +8448,9 @@ class IncomingBookingsScreen extends StatefulWidget {
 class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
   List<Booking> _bookings = [];
   bool _loading = true;
+  // IDs van boekingen die deze eigenaar al heeft beoordeeld —
+  // gebruikt om "Beoordeel boeker" vs. "Beoordeeld" badge te bepalen.
+  Set<String> _reviewedByMeBookingIds = {};
 
   @override
   void initState() {
@@ -4974,9 +8478,19 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
           .map((m) => Booking.fromMap(m as Map<String, dynamic>))
           .toList();
 
+      // Haal de booking_ids op die ik (als eigenaar) al heb beoordeeld.
+      final reviewedRows = await supabase
+          .from('booker_reviews')
+          .select('booking_id')
+          .eq('reviewer_id', userId);
+      final reviewedIds = (reviewedRows as List)
+          .map((r) => (r as Map<String, dynamic>)['booking_id'] as String)
+          .toSet();
+
       if (!mounted) return;
       setState(() {
         _bookings = list;
+        _reviewedByMeBookingIds = reviewedIds;
         _loading = false;
       });
 
@@ -5022,11 +8536,20 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    // Pending = wacht op mijn goedkeuring. Komt bovenaan, ook als de starttijd
+    // al verlopen is (dan kan ik 'm alsnog weigeren).
+    final pending =
+        _bookings.where((b) => b.status == 'pending').toList();
     final upcoming = _bookings
-        .where((b) => b.endTime.isAfter(now) && b.status != 'cancelled')
+        .where((b) =>
+            b.status == 'confirmed' && b.endTime.isAfter(now))
         .toList();
     final past = _bookings
-        .where((b) => !b.endTime.isAfter(now) || b.status == 'cancelled')
+        .where((b) =>
+            b.status != 'pending' &&
+            (!b.endTime.isAfter(now) ||
+                b.status == 'cancelled' ||
+                b.status == 'rejected'))
         .toList();
 
     return Scaffold(
@@ -5049,6 +8572,12 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
+                      if (pending.isNotEmpty) ...[
+                        _sectionHeader('Wacht op jou', pending.length),
+                        const SizedBox(height: 8),
+                        ...pending.map(_bookingCard),
+                        const SizedBox(height: 24),
+                      ],
                       if (upcoming.isNotEmpty) ...[
                         _sectionHeader('Aankomend', upcoming.length),
                         const SizedBox(height: 8),
@@ -5144,6 +8673,8 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
 
   Widget _bookingCard(Booking b) {
     final isCancelled = b.status == 'cancelled';
+    final isRejected = b.status == 'rejected';
+    final isPending = b.status == 'pending';
     final isPast = !b.endTime.isAfter(DateTime.now());
     final chargerName = b.charger?.name ?? 'Laadpaal';
     final bookerName = b.userName ?? 'Onbekende gebruiker';
@@ -5153,6 +8684,12 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
     if (isCancelled) {
       pillColor = AppColors.danger;
       pillText = 'Geannuleerd';
+    } else if (isRejected) {
+      pillColor = AppColors.danger;
+      pillText = 'Geweigerd';
+    } else if (isPending) {
+      pillColor = const Color(0xFFE0A030);
+      pillText = 'In afwachting';
     } else if (isPast) {
       pillColor = AppColors.textSecondary;
       pillText = 'Afgelopen';
@@ -5298,8 +8835,1218 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
                 ),
               ),
             ],
+            // Bericht aan boeker — altijd zichtbaar
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        otherUserId: b.userId,
+                        otherUserName: bookerName,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                label: const Text('Bericht'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  textStyle: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            // Pending → Accepteer + Weiger knoppen
+            if (isPending) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _decideOnBooking(b, accept: false),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      label: const Text('Weiger'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.danger,
+                        side: const BorderSide(color: AppColors.danger),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        textStyle: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _decideOnBooking(b, accept: true),
+                      icon: const Icon(Icons.check_rounded, size: 18),
+                      label: const Text('Accepteer'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        textStyle: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            // Afgelopen + bevestigd (geen pending/cancelled/rejected) →
+            // eigenaar kan boeker beoordelen
+            if (isPast && b.status == 'confirmed') ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _reviewedByMeBookingIds.contains(b.id)
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySoft,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.check_circle_rounded,
+                              size: 14,
+                              color: AppColors.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Beoordeeld',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : TextButton.icon(
+                        onPressed: () async {
+                          final result = await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  WriteBookerReviewScreen(booking: b),
+                            ),
+                          );
+                          if (result == true) _load();
+                        },
+                        icon: const Icon(Icons.star_rounded, size: 16),
+                        label: const Text('Beoordeel boeker'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          textStyle: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  // Opent een dialog met booker review-samenvatting + bevestigingsknop.
+  // accept=true -> status wordt 'confirmed', anders 'rejected'.
+  Future<void> _decideOnBooking(Booking b, {required bool accept}) async {
+    // 1) Haal eerdere booker_reviews over deze gebruiker op (door alle
+    //    eigenaren samen). RLS staat dit toe (public select op
+    //    booker_reviews).
+    List<BookerReview> previousReviews = [];
+    try {
+      final rows = await supabase
+          .from('booker_reviews')
+          .select()
+          .eq('booker_id', b.userId)
+          .order('created_at', ascending: false)
+          .limit(20);
+      previousReviews = (rows as List)
+          .map((r) => BookerReview.fromMap(r as Map<String, dynamic>))
+          .toList();
+    } catch (_) {/* niet fataal — toon dialog zonder reviews */}
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) =>
+          _AcceptRejectDialog(
+        booking: b,
+        previousReviews: previousReviews,
+        accept: accept,
+      ),
+    );
+    if (confirmed != true) return;
+
+    // 2) Status updaten in DB
+    try {
+      await supabase
+          .from('bookings')
+          .update({'status': accept ? 'confirmed' : 'rejected'})
+          .eq('id', b.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(accept
+              ? 'Boeking geaccepteerd. ${b.userName ?? "De boeker"} krijgt bericht.'
+              : 'Boeking geweigerd. ${b.userName ?? "De boeker"} krijgt bericht.'),
+          backgroundColor:
+              accept ? AppColors.primary : AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _load();
+      // 3) Roep send-email edge function aan om de boeker per e-mail te
+      //    informeren. Fire-and-forget — als het faalt blokkeert dat de UI niet.
+      _sendDecisionEmail(b, accept);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon status niet bijwerken: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // Stuur de boeker een e-mail bij een accept/reject beslissing.
+  // Roept de bestaande Supabase edge function `send-email` aan, die
+  // Resend gebruikt en {to, subject, html} verwacht.
+  // Fire-and-forget — faalt stilletjes als er geen email-adres is.
+  // ----------------------------------------------------------------
+  Future<void> _sendDecisionEmail(Booking b, bool accept) async {
+    final to = b.userEmail;
+    if (to == null || to.isEmpty) return; // oudere boekingen zonder email
+
+    final chargerName = b.charger?.name ?? 'de laadpaal';
+    final chargerAddress = b.charger?.address ?? '';
+    final boekerNaam = b.userName?.split(' ').first ?? 'daar';
+
+    // Datum/tijd in NL formaat (gebruik bestaande helpers, geen intl)
+    final datum = _formatDateHeader(b.startTime);
+    String two(int n) => n.toString().padLeft(2, '0');
+    final start = '${two(b.startTime.hour)}:${two(b.startTime.minute)}';
+    final eind = '${two(b.endTime.hour)}:${two(b.endTime.minute)}';
+
+    final subject = accept
+        ? 'Je boeking bij $chargerName is bevestigd '
+        : 'Je aanvraag voor $chargerName is helaas afgewezen';
+
+    final statusBlok = accept
+        ? '''
+<div style="background:#E8F5E9;border-left:4px solid #2E7D32;padding:16px 20px;margin:24px 0;border-radius:6px;">
+  <p style="margin:0;color:#1B5E20;font-size:16px;font-weight:600;">Bevestigd</p>
+  <p style="margin:4px 0 0;color:#1B5E20;font-size:14px;">De eigenaar heeft je aanvraag goedgekeurd. Je kunt op het afgesproken moment komen laden.</p>
+</div>'''
+        : '''
+<div style="background:#FFEBEE;border-left:4px solid #C62828;padding:16px 20px;margin:24px 0;border-radius:6px;">
+  <p style="margin:0;color:#B71C1C;font-size:16px;font-weight:600;">Afgewezen</p>
+  <p style="margin:4px 0 0;color:#B71C1C;font-size:14px;">Helaas heeft de eigenaar je aanvraag voor dit tijdslot afgewezen. Probeer eens een ander moment of een andere paal in de buurt.</p>
+</div>''';
+
+    final adresRegel = chargerAddress.isEmpty
+        ? ''
+        : '<tr><td style="padding:6px 0;color:#666;">Adres</td><td style="padding:6px 0;font-weight:500;">$chargerAddress</td></tr>';
+
+    final html = '''
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px;">
+    <h1 style="margin:0 0 8px;color:#1976D2;font-size:24px;">Pluggo</h1>
+    <p style="margin:0 0 24px;color:#666;font-size:14px;">Buren laden bij buren</p>
+
+    <h2 style="margin:0 0 16px;font-size:20px;color:#222;">Hoi $boekerNaam,</h2>
+
+    $statusBlok
+
+    <table style="width:100%;border-collapse:collapse;font-size:14px;color:#222;margin:0 0 24px;">
+      <tr><td style="padding:6px 0;color:#666;width:90px;">Paal</td><td style="padding:6px 0;font-weight:500;">$chargerName</td></tr>
+      $adresRegel
+      <tr><td style="padding:6px 0;color:#666;">Datum</td><td style="padding:6px 0;font-weight:500;">$datum</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Tijd</td><td style="padding:6px 0;font-weight:500;">$start – $eind</td></tr>
+    </table>
+
+    <p style="margin:0 0 8px;color:#444;font-size:14px;">Open de Pluggo-app om je boeking te bekijken.</p>
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px;">
+    <p style="margin:0;color:#999;font-size:12px;">Je ontvangt deze mail omdat je een boeking hebt aangevraagd via Pluggo.</p>
+  </div>
+</body>
+</html>
+''';
+
+    try {
+      await supabase.functions.invoke(
+        'send-email',
+        body: {
+          'to': to,
+          'subject': subject,
+          'html': html,
+        },
+      );
+    } catch (_) {
+      // E-mail is best-effort; in-app status is leidend.
+    }
+  }
+}
+
+// ============================================================================
+// ACCEPT/REJECT BEVESTIGINGS-DIALOG met booker review summary
+// ============================================================================
+class _AcceptRejectDialog extends StatelessWidget {
+  final Booking booking;
+  final List<BookerReview> previousReviews;
+  final bool accept;
+
+  const _AcceptRejectDialog({
+    required this.booking,
+    required this.previousReviews,
+    required this.accept,
+  });
+
+  double? get _avgRating {
+    if (previousReviews.isEmpty) return null;
+    final sum =
+        previousReviews.fold<int>(0, (a, b) => a + b.rating);
+    return sum / previousReviews.length;
+  }
+
+  Widget _stars(double rating, {double size = 16}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (i) {
+        final n = i + 1;
+        IconData icon;
+        if (rating >= n) {
+          icon = Icons.star_rounded;
+        } else if (rating >= n - 0.5) {
+          icon = Icons.star_half_rounded;
+        } else {
+          icon = Icons.star_outline_rounded;
+        }
+        return Icon(icon, size: size, color: const Color(0xFFFFC107));
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bookerName = booking.userName ?? 'Deze boeker';
+    final avg = _avgRating;
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 560),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                accept
+                    ? 'Boeking accepteren?'
+                    : 'Boeking weigeren?',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                accept
+                    ? '$bookerName krijgt direct bericht dat de aanvraag is geaccepteerd.'
+                    : '$bookerName krijgt direct bericht dat de aanvraag is geweigerd.',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Divider(height: 1, color: AppColors.divider),
+              const SizedBox(height: 12),
+              Text(
+                'EERDERE BEOORDELINGEN VAN DEZE BOEKER',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (previousReviews.isEmpty)
+                Text(
+                  'Nog geen eerdere beoordelingen — dit is hun eerste boeking via Pluggo (of niemand heeft ze nog beoordeeld).',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.textPrimary,
+                    height: 1.4,
+                  ),
+                )
+              else ...[
+                Row(
+                  children: [
+                    _stars(avg!, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${avg.toStringAsFixed(1)} · ${previousReviews.length} review${previousReviews.length == 1 ? '' : 's'}',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: previousReviews.length,
+                    itemBuilder: (ctx, i) {
+                      final r = previousReviews[i];
+                      final reviewer =
+                          (r.reviewerName?.trim().isNotEmpty ?? false)
+                              ? r.reviewerName!
+                              : 'Eigenaar';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.background,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  _stars(r.rating.toDouble(), size: 14),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      reviewer,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (r.comment != null &&
+                                  r.comment!.trim().isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  r.comment!,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Annuleer'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            accept ? AppColors.primary : AppColors.danger,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        accept ? 'Accepteer' : 'Weiger',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// CHAT — gesprekken-inbox + chatscherm tussen 2 gebruikers (per partner)
+// ============================================================================
+
+// Helper: zoek of maak een conversation tussen huidige user en otherUserId.
+// Sorteert ids alfabetisch zodat (A,B) en (B,A) hetzelfde gesprek zijn.
+Future<Conversation?> _findOrCreateConversation(
+  String otherUserId, {
+  String? otherUserName,
+}) async {
+  final myId = supabase.auth.currentUser?.id;
+  if (myId == null) return null;
+  final ids = [myId, otherUserId]..sort();
+  final userA = ids.first;
+  final userB = ids.last;
+  try {
+    // Eerst proberen op te halen
+    final existing = await supabase
+        .from('conversations')
+        .select()
+        .eq('user_a_id', userA)
+        .eq('user_b_id', userB)
+        .maybeSingle();
+    if (existing != null) {
+      return Conversation.fromMap(existing as Map<String, dynamic>)
+          .copyWith(otherUserName: otherUserName);
+    }
+    // Niet bestaand — aanmaken
+    final inserted = await supabase
+        .from('conversations')
+        .insert({'user_a_id': userA, 'user_b_id': userB})
+        .select()
+        .single();
+    return Conversation.fromMap(inserted as Map<String, dynamic>)
+        .copyWith(otherUserName: otherUserName);
+  } catch (_) {
+    return null;
+  }
+}
+
+// Inbox: lijst van alle gesprekken van de huidige gebruiker
+class ConversationsScreen extends StatefulWidget {
+  const ConversationsScreen({Key? key}) : super(key: key);
+
+  @override
+  State<ConversationsScreen> createState() => _ConversationsScreenState();
+}
+
+class _ConversationsScreenState extends State<ConversationsScreen> {
+  bool _loading = true;
+  List<Conversation> _conversations = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final myId = supabase.auth.currentUser?.id;
+    if (myId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      final rows = await supabase
+          .from('conversations')
+          .select()
+          .or('user_a_id.eq.$myId,user_b_id.eq.$myId')
+          .order('last_message_at', ascending: false);
+
+      // Bouw lijst, voeg naam van andere partij toe (uit bookings.user_name
+      // of charger.owner — voor MVP halen we 'm uit recente boekingen).
+      final list = <Conversation>[];
+      for (final r in rows as List) {
+        list.add(Conversation.fromMap(r as Map<String, dynamic>));
+      }
+
+      // Naam-resolutie: kijk in bookings welke naam bij elk other-user-id hoort
+      final otherIds = list.map((c) => c.otherUserId(myId)).toSet().toList();
+      final namesById = <String, String>{};
+      if (otherIds.isNotEmpty) {
+        try {
+          // Andere partij als boeker
+          final asBooker = await supabase
+              .from('bookings')
+              .select('user_id, user_name')
+              .inFilter('user_id', otherIds);
+          for (final b in asBooker as List) {
+            final m = b as Map<String, dynamic>;
+            final uid = m['user_id'] as String?;
+            final nm = m['user_name'] as String?;
+            if (uid != null && nm != null) namesById[uid] = nm;
+          }
+        } catch (_) {/* niet fataal */}
+      }
+
+      // Ongelezen-aantal per conversation: simpel via count-query per stuk
+      final unreadById = <String, int>{};
+      for (final c in list) {
+        try {
+          final unreadRows = await supabase
+              .from('messages')
+              .select('id')
+              .eq('conversation_id', c.id)
+              .neq('sender_id', myId)
+              .filter('seen_at', 'is', null);
+          unreadById[c.id] = (unreadRows as List).length;
+        } catch (_) {
+          unreadById[c.id] = 0;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _conversations = list
+            .map((c) => c.copyWith(
+                  otherUserName: namesById[c.otherUserId(myId)],
+                  unreadCount: unreadById[c.id] ?? 0,
+                ))
+            .toList();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  String _previewTime(DateTime? dt) {
+    if (dt == null) return '';
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inMinutes < 1) return 'nu';
+    if (diff.inHours < 1) return '${diff.inMinutes} min';
+    if (diff.inDays < 1) return '${diff.inHours} u';
+    if (diff.inDays < 7) return '${diff.inDays} d';
+    return '${dt.day} ${_monthNames[dt.month].substring(0, 3)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final myId = supabase.auth.currentUser?.id;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Text('Berichten',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _conversations.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.chat_bubble_outline_rounded,
+                            size: 56, color: AppColors.textSecondary),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Nog geen berichten',
+                          style: GoogleFonts.inter(
+                              fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Stuur een bericht via de detailpagina van een paal of vanuit je boekingen.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.inter(
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
+                              height: 1.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: _conversations.length,
+                    separatorBuilder: (_, __) =>
+                        Divider(height: 1, color: AppColors.divider),
+                    itemBuilder: (ctx, i) {
+                      final c = _conversations[i];
+                      final name = c.otherUserName ?? 'Gebruiker';
+                      final preview = c.lastMessagePreview ?? '';
+                      final unread = c.unreadCount;
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppColors.primarySoft,
+                          child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : '?',
+                            style: GoogleFonts.inter(
+                              color: AppColors.primaryDark,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          name,
+                          style: GoogleFonts.inter(
+                            fontWeight:
+                                unread > 0 ? FontWeight.w700 : FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text(
+                          preview.isEmpty ? 'Nieuw gesprek' : preview,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            color: unread > 0
+                                ? AppColors.textPrimary
+                                : AppColors.textSecondary,
+                            fontWeight: unread > 0
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                          ),
+                        ),
+                        trailing: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              _previewTime(c.lastMessageAt),
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            if (unread > 0) ...[
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '$unread',
+                                  style: GoogleFonts.inter(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        onTap: () async {
+                          if (myId == null) return;
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ChatScreen(
+                                otherUserId: c.otherUserId(myId),
+                                otherUserName: name,
+                                conversation: c,
+                              ),
+                            ),
+                          );
+                          _load(); // herlaad bij terugkeer
+                        },
+                      );
+                    },
+                  ),
+                ),
+    );
+  }
+}
+
+// Het gesprek zelf: lijst van messages + input onderaan
+class ChatScreen extends StatefulWidget {
+  final String otherUserId;
+  final String? otherUserName;
+  // Optioneel: meegeven als je 'm al hebt, anders zoeken/aanmaken
+  final Conversation? conversation;
+
+  const ChatScreen({
+    Key? key,
+    required this.otherUserId,
+    this.otherUserName,
+    this.conversation,
+  }) : super(key: key);
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  Conversation? _conversation;
+  List<ChatMessage> _messages = [];
+  bool _loading = true;
+  bool _sending = false;
+  final TextEditingController _inputController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _inputController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _bootstrap() async {
+    Conversation? conv = widget.conversation;
+    conv ??= await _findOrCreateConversation(widget.otherUserId,
+        otherUserName: widget.otherUserName);
+    if (!mounted) return;
+    if (conv == null) {
+      setState(() => _loading = false);
+      return;
+    }
+    setState(() => _conversation = conv);
+    await _loadMessages();
+  }
+
+  Future<void> _loadMessages() async {
+    final conv = _conversation;
+    if (conv == null) return;
+    try {
+      final rows = await supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', conv.id)
+          .order('created_at', ascending: true);
+      final list = (rows as List)
+          .map((r) => ChatMessage.fromMap(r as Map<String, dynamic>))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _messages = list;
+        _loading = false;
+      });
+      _scrollToBottom();
+      _markAsSeen();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  Future<void> _markAsSeen() async {
+    final conv = _conversation;
+    final myId = supabase.auth.currentUser?.id;
+    if (conv == null || myId == null) return;
+    try {
+      await supabase
+          .from('messages')
+          .update({'seen_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('conversation_id', conv.id)
+          .neq('sender_id', myId)
+          .filter('seen_at', 'is', null);
+    } catch (_) {/* niet fataal */}
+  }
+
+  Future<void> _sendMessage() async {
+    final conv = _conversation;
+    final body = _inputController.text.trim();
+    if (conv == null || body.isEmpty) return;
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+    final senderName = user.userMetadata != null &&
+            user.userMetadata!['full_name'] is String
+        ? user.userMetadata!['full_name'] as String
+        : (user.email ?? 'Onbekend');
+
+    setState(() => _sending = true);
+    _inputController.clear();
+
+    try {
+      // Optimistic UI: voeg bericht toe vóór de server-call
+      final tempId = 'temp-${DateTime.now().microsecondsSinceEpoch}';
+      final temp = ChatMessage(
+        id: tempId,
+        conversationId: conv.id,
+        senderId: user.id,
+        senderName: senderName,
+        body: body,
+        createdAt: DateTime.now(),
+      );
+      setState(() => _messages = [..._messages, temp]);
+      _scrollToBottom();
+
+      // Insert message
+      await supabase.from('messages').insert({
+        'conversation_id': conv.id,
+        'sender_id': user.id,
+        'sender_name': senderName,
+        'body': body,
+      });
+
+      // Update conversation preview
+      await supabase.from('conversations').update({
+        'last_message_at': DateTime.now().toUtc().toIso8601String(),
+        'last_message_preview':
+            body.length > 100 ? '${body.substring(0, 100)}…' : body,
+        'last_message_sender_id': user.id,
+      }).eq('id', conv.id);
+
+      // Email-notificatie (gebundeld: max 1 per uur per gesprek)
+      _maybeSendChatEmail(conv, senderName, body);
+
+      // Herlaad de echte messages (vervangt temp door echte row)
+      await _loadMessages();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Bericht niet verstuurd: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  // Stuurt mail naar de andere partij, max 1x per uur per conversation.
+  Future<void> _maybeSendChatEmail(
+      Conversation conv, String senderName, String body) async {
+    final myId = supabase.auth.currentUser?.id;
+    if (myId == null) return;
+    final otherId = conv.otherUserId(myId);
+
+    // Check throttle: laatste mail moet > 1u geleden zijn (of null)
+    final last = conv.lastEmailSentAt;
+    if (last != null && DateTime.now().difference(last).inHours < 1) {
+      return; // gebundeld
+    }
+
+    // Other user email opzoeken via bookings (heeft user_email) of chargers
+    String? otherEmail;
+    try {
+      final asBooker = await supabase
+          .from('bookings')
+          .select('user_email')
+          .eq('user_id', otherId)
+          .not('user_email', 'is', null)
+          .limit(1)
+          .maybeSingle();
+      if (asBooker != null) {
+        otherEmail = (asBooker as Map<String, dynamic>)['user_email'] as String?;
+      }
+    } catch (_) {/* niet fataal */}
+    if (otherEmail == null || otherEmail.isEmpty) {
+      try {
+        final asOwner = await supabase
+            .from('chargers')
+            .select('owner_email')
+            .eq('owner_id', otherId)
+            .not('owner_email', 'is', null)
+            .limit(1)
+            .maybeSingle();
+        if (asOwner != null) {
+          otherEmail =
+              (asOwner as Map<String, dynamic>)['owner_email'] as String?;
+        }
+      } catch (_) {/* niet fataal */}
+    }
+    if (otherEmail == null || otherEmail.isEmpty) return;
+
+    final preview =
+        body.length > 200 ? '${body.substring(0, 200)}…' : body;
+    final subject = 'Nieuw bericht van $senderName op Pluggo';
+    final html = '''
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px;">
+    <h1 style="margin:0 0 8px;color:#00795A;font-size:24px;">Pluggo</h1>
+    <p style="margin:0 0 24px;color:#666;font-size:14px;">Buren laden bij buren</p>
+    <h2 style="margin:0 0 16px;font-size:20px;color:#222;">Nieuw bericht van $senderName</h2>
+    <div style="background:#E6F7F1;border-left:4px solid #00A87E;padding:16px 20px;margin:0 0 24px;border-radius:6px;">
+      <p style="margin:0;color:#222;font-size:14px;font-style:italic;">"$preview"</p>
+    </div>
+    <p style="margin:0 0 8px;color:#444;font-size:14px;">Open de Pluggo-app om te reageren. Vervolgberichten in dit gesprek krijgen pas weer een mail na een uur, zodat je inbox rustig blijft.</p>
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px;">
+    <p style="margin:0;color:#999;font-size:12px;">Je ontvangt deze mail omdat iemand je een bericht stuurde via Pluggo.</p>
+  </div>
+</body>
+</html>
+''';
+
+    try {
+      await supabase.functions.invoke('send-email', body: {
+        'to': otherEmail,
+        'subject': subject,
+        'html': html,
+      });
+      // Throttle-timestamp updaten zodat volgende mail pas na 1u kan
+      await supabase.from('conversations').update({
+        'last_email_sent_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', conv.id);
+    } catch (_) {/* best-effort */}
+  }
+
+  String _formatTime(DateTime dt) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(dt.hour)}:${two(dt.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final myId = supabase.auth.currentUser?.id;
+    final name = widget.otherUserName ?? 'Gebruiker';
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: AppColors.primarySoft,
+              child: Text(
+                name.isNotEmpty ? name[0].toUpperCase() : '?',
+                style: GoogleFonts.inter(
+                  color: AppColors.primaryDark,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                name,
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _messages.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Text(
+                            'Nog geen berichten — stuur de eerste!',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        itemCount: _messages.length,
+                        itemBuilder: (ctx, i) {
+                          final m = _messages[i];
+                          final isMe = m.senderId == myId;
+                          return Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              constraints: BoxConstraints(
+                                maxWidth:
+                                    MediaQuery.of(context).size.width * 0.75,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? AppColors.primary
+                                    : AppColors.surface,
+                                borderRadius: BorderRadius.only(
+                                  topLeft: const Radius.circular(16),
+                                  topRight: const Radius.circular(16),
+                                  bottomLeft: Radius.circular(isMe ? 16 : 4),
+                                  bottomRight: Radius.circular(isMe ? 4 : 16),
+                                ),
+                                boxShadow: softShadow,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    m.body,
+                                    style: GoogleFonts.inter(
+                                      color: isMe
+                                          ? Colors.white
+                                          : AppColors.textPrimary,
+                                      fontSize: 14,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    _formatTime(m.createdAt),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      color: isMe
+                                          ? Colors.white70
+                                          : AppColors.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+          // Input
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              border: Border(
+                top: BorderSide(color: AppColors.divider, width: 1),
+              ),
+            ),
+            padding: EdgeInsets.only(
+              left: 12,
+              right: 8,
+              top: 8,
+              bottom: MediaQuery.of(context).viewPadding.bottom + 8,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _inputController,
+                    maxLines: 5,
+                    minLines: 1,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Schrijf een bericht…',
+                      hintStyle: GoogleFonts.inter(
+                          color: AppColors.textSecondary, fontSize: 14),
+                      filled: true,
+                      fillColor: AppColors.background,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Material(
+                  color: AppColors.primary,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: _sending ? null : _sendMessage,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: _sending
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation(
+                                    Colors.white),
+                              ),
+                            )
+                          : const Icon(Icons.send_rounded,
+                              color: Colors.white, size: 20),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -5438,7 +10185,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 24),
+              // Vóór 1 juni: launch-banner zodat nieuwe downloaders zien
+              // dat ze een seintje krijgen als ze nu vast een account
+              // aanmaken. Verdwijnt automatisch zodra de launch live is.
+              if (!bookingsAreLive) ...[
+                const LaunchCountdownBanner(showAccountHint: true),
+                const SizedBox(height: 24),
+              ],
+              const SizedBox(height: 16),
               _fieldLabel('E-mailadres'),
               _authTextField(
                 controller: _emailController,
@@ -5660,7 +10415,14 @@ class _SignupScreenState extends State<SignupScreen> {
                   color: AppColors.textSecondary,
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 20),
+              // Pre-launch banner — gebruikers die nu vast registreren
+              // krijgen een seintje zodra boekingen open gaan op 1 juni.
+              if (!bookingsAreLive) ...[
+                const LaunchCountdownBanner(showAccountHint: true),
+                const SizedBox(height: 20),
+              ],
+              const SizedBox(height: 12),
               _fieldLabel('Jouw naam'),
               _authTextField(
                 controller: _nameController,
@@ -6047,12 +10809,18 @@ class _ChargerCard extends StatefulWidget {
   // Callback die wordt aangeroepen na een succesvolle toggle,
   // zodat de HomeScreen de kaart-markers en de lijst kan verversen.
   final VoidCallback? onChanged;
+  // Optioneel: gemiddelde charger-rating (1-5) en aantal reviews.
+  // null = (nog) niet geladen of geen reviews → niets tonen.
+  final double? avgRating;
+  final int reviewCount;
 
   const _ChargerCard({
     required this.charger,
     required this.onTap,
     this.isOwner = false,
     this.onChanged,
+    this.avgRating,
+    this.reviewCount = 0,
   });
 
   @override
@@ -6164,6 +10932,37 @@ class _ChargerCardState extends State<_ChargerCard> {
                           color: AppColors.textSecondary,
                         ),
                       ),
+                      // Sterren + aantal reviews — alleen tonen als er
+                      // tenminste 1 review is.
+                      if (widget.avgRating != null && widget.reviewCount > 0) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.star_rounded,
+                              size: 14,
+                              color: Color(0xFFF9A825),
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              widget.avgRating!.toStringAsFixed(1),
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '(${widget.reviewCount})',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       Row(
                         children: [
