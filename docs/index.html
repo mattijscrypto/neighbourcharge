@@ -269,8 +269,15 @@
       grid-template-columns: repeat(3, 1fr);
       gap: 20px;
     }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 32px;
+    }
     @media (max-width: 720px) {
       .grid-3 { grid-template-columns: 1fr; }
+      .grid-2 { grid-template-columns: 1fr; }
     }
     .card {
       padding: 28px;
@@ -291,7 +298,10 @@
     }
     .card p {
       color: var(--muted);
-      margin: 0;
+      margin: 0 0 12px 0;
+    }
+    .card p:last-child {
+      margin-bottom: 0;
     }
 
     /* ---------- HOW IT WORKS ---------- */
@@ -503,6 +513,7 @@
       </a>
       <div class="nav-links">
         <a href="#hoe-werkt-het">Hoe werkt het</a>
+        <a href="#slim-laden">Slim laden</a>
         <a href="#impact">Impact</a>
         <a href="#faq">FAQ</a>
         <a href="#meedoen" class="nav-cta">Doe mee</a>
@@ -574,7 +585,7 @@
         Nederland telt meer dan 600.000 elektrische auto's en groeit hard door. De infrastructuur loopt achter — terwijl er duizenden privélaadpalen elke dag stilstaan.
       </p>
 
-      <div class="grid-3">
+      <div class="grid-2">
         <div class="card">
           <div class="icon">🔌</div>
           <h3>Voor laders</h3>
@@ -586,9 +597,14 @@
           <p>Een privélaadpaal kost al gauw €1.500. Hij wordt vaak maar een paar uur per dag gebruikt. De rest van de tijd: pure stilstand, geen rendement.</p>
         </div>
         <div class="card">
-          <div class="icon">🌍</div>
-          <h3>Voor Nederland</h3>
-          <p>Elke nieuwe publieke paal kost gemeentegeld, beton, kabels en jaren wachttijd. Terwijl de capaciteit die er al ligt, voor 80% onbenut blijft.</p>
+          <div class="icon">☀️</div>
+          <h3>Voor zonnepaneeleigenaars</h3>
+          <p>Saldering wordt afgebouwd en energieleveranciers rekenen straks boetes voor terugleveren. Je zonneoverschot is geld waard — als je het zelf gebruikt, of doorverkoopt aan een buur die laadt.</p>
+        </div>
+        <div class="card">
+          <div class="icon">⚡</div>
+          <h3>Voor het stroomnet</h3>
+          <p>Het Nederlandse net loopt tegen z'n grenzen. Avondpieken zijn extreem, overdag staat capaciteit ongebruikt. Nieuwe palen plaatsen kost jaren. De infrastructuur die er al ligt, blijft voor 80% onbenut.</p>
         </div>
       </div>
     </div>
@@ -656,17 +672,52 @@
     </div>
   </section>
 
-  <section id="impact">
+  <section id="slim-laden">
+    <div class="section-inner">
+      <div class="eyebrow">Slim laden</div>
+      <h2>Zonneoverschot dat opbrengt. Een net dat ademt.</h2>
+      <p class="section-lead">
+        Pluggo is meer dan een marktplaats voor laadpalen. Het is een manier om je zonnepanelen te laten renderen op het moment dat saldering verdwijnt — én een instrument om samen de druk van het stroomnet te halen.
+      </p>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="icon">☀️</div>
+          <h3>Van zonneoverschot naar zakgeld</h3>
+          <p>Saldering wordt afgebouwd. Energieleveranciers rekenen straks <strong>terugleverboetes</strong> op stroom die je teveel produceert — en de marktprijs op zonnige middagen zakt richting nul of zelfs negatief.</p>
+          <p>Met Pluggo verkoop je dat overschot niet meer terug aan een leverancier, maar gebruik je het om een buurman z'n EV op te laden — voor jouw prijs. €100 tot €200 per maand extra is haalbaar, en elke kWh die je via Pluggo levert, hoef je niet voor een schamel bedrag (of met boete) terug het net op te duwen.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🔋</div>
+          <h3>Laad waar de zon schijnt</h3>
+          <p>De makkelijkste manier om het stroomnet te ontlasten is overdag laden, als de zon schijnt en het net ruimte heeft. Pluggo maakt dat eindelijk praktisch.</p>
+          <p>Een paal op vijf minuten lopen van je werk. De oprit van je tante als je 's middags op bezoek gaat. Een buurman die zijn paal aanbiedt tussen tien en drie. Kleine keuzes, opgeteld over duizenden mensen, dempen de avondpiek waar het net nu het zwaarst onder lijdt.</p>
+        </div>
+      </div>
+
+      <blockquote>
+        Het stroomnet is geen bottomless pit. Elke EV die overdag laadt in plaats van 's avonds tussen zes en negen, is één auto minder die meeduwt op de piek.
+      </blockquote>
+    </div>
+  </section>
+
+  <section class="alt-bg" id="impact">
     <div class="section-inner section-narrow">
       <div class="eyebrow">De toekomst</div>
       <h2>De grootste laadinfrastructuur staat al in Nederland — we moeten 'm alleen nog ontsluiten.</h2>
 
       <div class="impact-text">
         <p>
-          Stel je voor dat in elke straat één of twee buurtgenoten hun paal delen via Pluggo. Een EV-rijder hoeft niet meer naar een snellader buiten de wijk; hij loopt vijftig meter. Iemand zonder eigen oprit, in een appartement, kan toch elektrisch rijden. De gemeente hoeft minder palen te plaatsen. Het stroomnet wordt slimmer benut — vaak al wanneer er overdag overschot is.
+          Stel je voor dat in elke straat één of twee buurtgenoten hun paal delen via Pluggo. Een EV-rijder hoeft niet meer naar een snellader buiten de wijk; hij loopt vijftig meter. Iemand zonder eigen oprit, in een appartement, kan toch elektrisch rijden. De gemeente hoeft minder palen te plaatsen. En cruciaal: een groot deel van die laadsessies verschuift naar overdag, naar momenten waarop er zonneoverschot is en het net ademruimte heeft.
         </p>
         <p>
-          Maar het idee is groter dan techniek. Deze beweging gaat over <strong>vertrouwen tussen buren</strong>. Over geld dat in de wijk blijft in plaats van naar grote energieconcerns. Over een infrastructuur waar je deelgenoot van bent, in plaats van klant van.
+          Want hier wordt het écht groot. Het Nederlandse stroomnet kraakt al. <strong>Netbeheerders waarschuwen openlijk voor overbelasting</strong>; in delen van het land kun je geen nieuwe aansluiting meer krijgen, en bij extreme pieken is een black-out geen sciencefiction meer maar een reëel risico. EV's die allemaal tegelijk thuis aan de paal hangen om half zeven 's avonds, maken dat probleem alleen maar groter.
+        </p>
+        <p>
+          Pluggo kan, als genoeg mensen meedoen, een verschil maken dat je in de transformatorhuisjes terugziet. Honderdduizend laadsessies per week die verschoven zijn van de piek naar het dal — dát is de soort gedragsverandering die het net redt. Niet door iedereen op te leggen wanneer ze moeten laden, maar door het simpel, voordelig en sociaal te maken om het op het juiste moment te doen.
+        </p>
+        <p>
+          Maar het idee is groter dan techniek of netbalans. Deze beweging gaat over <strong>vertrouwen tussen buren</strong>. Over geld dat in de wijk blijft in plaats van naar grote energieconcerns. Over een infrastructuur waar je deelgenoot van bent, in plaats van klant van.
         </p>
       </div>
 
@@ -686,7 +737,7 @@
       </div>
 
       <blockquote>
-        Als 100.000 Nederlanders hun paal delen, hebben we van de ene op de andere dag het grootste laadnetwerk van het land. Zonder één extra paal in de grond.
+        Als 100.000 Nederlanders hun paal delen, hebben we van de ene op de andere dag het grootste laadnetwerk van het land. Zonder één extra paal in de grond — en met een stroomnet dat eindelijk weer ademruimte krijgt.
       </blockquote>
 
       <div class="impact-text">
@@ -700,7 +751,7 @@
     </div>
   </section>
 
-  <section class="alt-bg" id="faq">
+  <section id="faq">
     <div class="section-inner section-narrow">
       <div class="eyebrow">FAQ</div>
       <h2>Veelgestelde vragen</h2>
@@ -713,6 +764,16 @@
       <details>
         <summary>Wat verdien ik als ik mijn paal deel?</summary>
         <p>Dat bepaal je zelf. Je stelt je eigen prijs per kWh in. Bij gemiddeld gebruik (een paar laadsessies per week) is €100 tot €200 per maand realistisch. Eigenaars houden alle inkomsten — Pluggo zal in de toekomst een kleine servicefee rekenen, maar transparant en duidelijk gecommuniceerd.</p>
+      </details>
+
+      <details>
+        <summary>Heb ik zonnepanelen nodig om mee te doen?</summary>
+        <p>Nee, absoluut niet. Pluggo werkt met of zonder zonnepanelen. Maar áls je panelen hebt, is Pluggo extra interessant: door de afbouw van saldering en de terugleverboetes die energieleveranciers gaan rekenen, wordt je zonneoverschot bij hen steeds minder waard. Via Pluggo verkoop je dat overschot voor jouw eigen prijs aan een buurman die laadt — een stuk gunstiger dan terugleveren aan het net.</p>
+      </details>
+
+      <details>
+        <summary>Help ik met Pluggo het stroomnet?</summary>
+        <p>Ja, en dat is misschien wel onze grootste lange-termijn ambitie. Het Nederlandse net loopt vol; de avondpiek tussen zes en negen is het grootste probleem. Als Pluggo doorgroeit, schuift een deel van die laadsessies naar overdag — naar palen bij iemands werk, bij familie, of in de buurt op een rustig moment. Elke verschuiving van piek naar dal helpt netbeheerders om overbelasting en in het uiterste geval black-outs te voorkomen.</p>
       </details>
 
       <details>
