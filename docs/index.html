@@ -300,6 +300,41 @@
       margin-bottom: 0;
     }
 
+    /* ---------- PRICE COMPARE ---------- */
+    .price-compare {
+      margin-top: 18px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      font-size: 14px;
+    }
+    .price-compare .price-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .price-compare .price-row:last-child {
+      border-bottom: none;
+    }
+    .price-compare .price-row span {
+      color: var(--muted);
+    }
+    .price-compare .price-row strong {
+      color: var(--text);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .price-compare .price-row.highlight {
+      background: var(--primary-light);
+    }
+    .price-compare .price-row.highlight span,
+    .price-compare .price-row.highlight strong {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
     /* ---------- HOW IT WORKS ---------- */
     .how-grid {
       display: grid;
@@ -681,8 +716,22 @@
         <div class="card">
           <div class="icon">☀️</div>
           <h3>Van zonneoverschot naar zakgeld</h3>
-          <p>Saldering wordt afgebouwd. Energieleveranciers rekenen straks <strong>terugleverboetes</strong> op stroom die je teveel produceert — en de marktprijs op zonnige middagen zakt richting nul of zelfs negatief.</p>
-          <p>Met Pluggo verkoop je dat overschot niet meer terug aan een leverancier, maar gebruik je het om een buurman z'n EV op te laden — voor jouw prijs. €100 tot €200 per maand extra is haalbaar, en elke kWh die je via Pluggo levert, hoef je niet voor een schamel bedrag (of met boete) terug het net op te duwen.</p>
+          <p>Saldering wordt per 2027 afgebouwd en energieleveranciers rekenen al <strong>terugleverboetes</strong> op stroom die je teveel produceert. Wat je tot nu toe via je leverancier kreeg voor je overschot, valt straks tegen.</p>
+          <p>Via Pluggo verkoop je diezelfde kWh aan een buur die laadt — voor een prijs die jij zelf bepaalt, vaak een veelvoud van wat een leverancier biedt.</p>
+          <div class="price-compare">
+            <div class="price-row">
+              <span>Bij gemiddelde leverancier</span>
+              <strong>€0,05 – €0,10 / kWh</strong>
+            </div>
+            <div class="price-row">
+              <span>Vanaf 2027 (wettelijk minimum)</span>
+              <strong>~€0,15 / kWh</strong>
+            </div>
+            <div class="price-row highlight">
+              <span>Via Pluggo aan een buur</span>
+              <strong>€0,30 – €0,45 / kWh</strong>
+            </div>
+          </div>
         </div>
         <div class="card">
           <div class="icon">🔋</div>
