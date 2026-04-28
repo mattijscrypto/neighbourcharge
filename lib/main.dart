@@ -158,6 +158,116 @@ Widget priceFeedback(TextEditingController controller) {
 }
 
 // ============================================
+// freeVendInfo — uitklapbare uitlegkaart in de "paal toevoegen" en
+// "paal bewerken"-flow. Wijst eigenaars erop dat hun paal in vrij-laden
+// modus moet staan zodat boekers zonder eigen laadpas kunnen laden,
+// en geeft per merk een korte hint hoe je dat instelt.
+// ============================================
+Widget _freeVendBrandTip(String brand, String tip) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: RichText(
+      text: TextSpan(
+        style: GoogleFonts.inter(
+          fontSize: 13,
+          color: AppColors.textSecondary,
+          height: 1.5,
+        ),
+        children: [
+          TextSpan(
+            text: '$brand — ',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          TextSpan(text: tip),
+        ],
+      ),
+    ),
+  );
+}
+
+Widget freeVendInfo() {
+  return Container(
+    decoration: BoxDecoration(
+      color: AppColors.solarSoft,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: AppColors.solar.withOpacity(0.45)),
+    ),
+    child: Theme(
+      data: ThemeData().copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+        iconColor: AppColors.solar,
+        collapsedIconColor: AppColors.solar,
+        leading: const Icon(Icons.lightbulb_outline, color: AppColors.solar),
+        title: Text(
+          'Zet je paal op "vrij laden"',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        subtitle: Text(
+          'Anders kan een boeker zonder jouw laadpas niet laden.',
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        children: [
+          Text(
+            'In vrij-laden modus (ook wel "Plug & Charge", "Auto-Start" '
+            'of "Free Vend") start het laden zodra de stekker in de auto '
+            'zit — zonder laadpas of app. Per merk heet die instelling anders:',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _freeVendBrandTip(
+            'Alfen Eve',
+            '"Plug & Charge" aanvinken in de Alfen-app of via je installateur.',
+          ),
+          _freeVendBrandTip(
+            'Wallbox',
+            '"Auto-Lock" uit in de myWallbox-app.',
+          ),
+          _freeVendBrandTip(
+            'Easee',
+            '"Vrij laden" inschakelen in de Easee-app.',
+          ),
+          _freeVendBrandTip(
+            'EVBox',
+            'Via je installateur of het EVBox-portal.',
+          ),
+          _freeVendBrandTip(
+            'Heidelberg / Schneider / overig',
+            'Vaak een DIP-switch in de paal of via je installateur.',
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Twijfel je? Bel je installateur of mail info@pluggoapp.nl — we helpen je op weg.',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+              fontStyle: FontStyle.italic,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ============================================
 // LaunchCountdownBanner — herbruikbare oranje banner die op meerdere
 // plekken in de app uitlegt dat boekingen pas vanaf [bookingsGoLiveAt]
 // open gaan. Toont automatisch niets meer zodra die datum is bereikt.
@@ -2872,6 +2982,8 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
               }).toList(),
             ),
             const SizedBox(height: 20),
+            freeVendInfo(),
+            const SizedBox(height: 20),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -3556,6 +3668,8 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
                 );
               }).toList(),
             ),
+            const SizedBox(height: 20),
+            freeVendInfo(),
             const SizedBox(height: 20),
             Container(
               decoration: BoxDecoration(
