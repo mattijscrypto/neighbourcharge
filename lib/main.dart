@@ -7050,6 +7050,228 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
     }
   }
 
+  // ----------------------------------------------------------------
+  // Boeker meldt een probleem met een lopende of aanstaande boeking.
+  // Stuurt 1 mail naar de eigenaar (zodat die kan reageren) én 1 mail
+  // naar info@pluggoapp.nl (zodat support kan bemiddelen). Geen DB-
+  // record voor MVP — escalatie loopt via e-mail + chat.
+  // ----------------------------------------------------------------
+  Future<void> _reportProblem(Booking booking) async {
+    final categories = <Map<String, String>>[
+      {'value': 'charger_broken', 'label': 'De paal werkt niet'},
+      {'value': 'spot_blocked', 'label': 'De parkeerplek is bezet'},
+      {'value': 'no_access', 'label': 'Ik kan er niet bij (toegang)'},
+      {'value': 'owner_no_response', 'label': 'De eigenaar reageert niet'},
+      {'value': 'other', 'label': 'Iets anders'},
+    ];
+    String selected = 'charger_broken';
+    final detailsCtrl = TextEditingController();
+
+    final shouldSend = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocalState) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text('Iets is mis?'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'We sturen je melding naar de eigenaar én naar Pluggo. '
+                  'Als laden niet lukt kun je daarna eventueel je boeking '
+                  'annuleren.',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ...categories.map(
+                  (c) => RadioListTile<String>(
+                    value: c['value']!,
+                    groupValue: selected,
+                    onChanged: (v) {
+                      if (v != null) {
+                        setLocalState(() => selected = v);
+                      }
+                    },
+                    title: Text(
+                      c['label']!,
+                      style: GoogleFonts.inter(fontSize: 14),
+                    ),
+                    activeColor: AppColors.primary,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: detailsCtrl,
+                  maxLines: 3,
+                  style: GoogleFonts.inter(fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Toelichting (optioneel)',
+                    hintStyle: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                    ),
+                    filled: true,
+                    fillColor: AppColors.background,
+                    contentPadding: const EdgeInsets.all(12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuleer'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'Verstuur',
+                style: TextStyle(color: AppColors.primary),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (shouldSend != true) return;
+
+    final categoryLabel =
+        categories.firstWhere((c) => c['value'] == selected)['label']!;
+    final details = detailsCtrl.text.trim();
+
+    // Fire-and-forget — de mails kunnen even duren. We tonen meteen feedback.
+    _sendProblemReport(booking, categoryLabel, details);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Melding verstuurd. We nemen contact op als het te lang duurt.',
+        ),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // Stuurt twee mails via de send-email edge function:
+  // 1) naar de eigenaar (urgent, met details boeker)
+  // 2) naar info@pluggoapp.nl (support log)
+  Future<void> _sendProblemReport(
+    Booking booking,
+    String categoryLabel,
+    String details,
+  ) async {
+    final ownerEmail = booking.charger?.ownerEmail;
+    final chargerName = booking.charger?.name ?? 'de laadpaal';
+    final chargerAddress = booking.charger?.address ?? '';
+    final boekerNaam = booking.userName ??
+        supabase.auth.currentUser?.email ??
+        'Een boeker';
+    final boekerEmail = supabase.auth.currentUser?.email ?? '';
+
+    final datum =
+        '${booking.startTime.day} ${_monthNames[booking.startTime.month]}';
+    String two(int n) => n.toString().padLeft(2, '0');
+    final start =
+        '${two(booking.startTime.hour)}:${two(booking.startTime.minute)}';
+    final eind =
+        '${two(booking.endTime.hour)}:${two(booking.endTime.minute)}';
+
+    final detailsBlok = details.isEmpty
+        ? ''
+        : '''
+<div style="background:#FFF8E1;border-left:4px solid #F9A825;padding:14px 18px;margin:0 0 24px;border-radius:6px;">
+  <p style="margin:0 0 4px;color:#7A5A00;font-size:13px;font-weight:600;">Toelichting van de boeker</p>
+  <p style="margin:0;color:#333;font-size:14px;line-height:1.5;">$details</p>
+</div>''';
+
+    final adresRegel = chargerAddress.isEmpty
+        ? ''
+        : '<tr><td style="padding:6px 0;color:#666;">Adres</td><td style="padding:6px 0;font-weight:500;">$chargerAddress</td></tr>';
+
+    // 1) Mail naar eigenaar
+    if (ownerEmail != null && ownerEmail.isNotEmpty) {
+      final ownerSubject = 'Probleem bij je laadpaal: $categoryLabel';
+      final ownerHtml = '''
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px;">
+    <h1 style="margin:0 0 8px;color:#1976D2;font-size:24px;">Pluggo</h1>
+    <p style="margin:0 0 24px;color:#666;font-size:14px;">Buren laden bij buren</p>
+
+    <div style="background:#FFEBEE;border-left:4px solid #C62828;padding:16px 20px;margin:0 0 24px;border-radius:6px;">
+      <p style="margin:0;color:#B71C1C;font-size:16px;font-weight:600;">$categoryLabel</p>
+      <p style="margin:4px 0 0;color:#B71C1C;font-size:14px;">$boekerNaam meldt een probleem bij een actieve boeking op $chargerName.</p>
+    </div>
+
+    $detailsBlok
+
+    <table style="width:100%;border-collapse:collapse;font-size:14px;color:#222;margin:0 0 24px;">
+      <tr><td style="padding:6px 0;color:#666;width:90px;">Boeker</td><td style="padding:6px 0;font-weight:500;">$boekerNaam</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Paal</td><td style="padding:6px 0;font-weight:500;">$chargerName</td></tr>
+      $adresRegel
+      <tr><td style="padding:6px 0;color:#666;">Datum</td><td style="padding:6px 0;font-weight:500;">$datum</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Tijd</td><td style="padding:6px 0;font-weight:500;">$start – $eind</td></tr>
+    </table>
+
+    <p style="margin:0 0 8px;color:#444;font-size:14px;">Open Pluggo om direct met de boeker te chatten. Lukt het echt niet meer, annuleer de boeking dan zodat de boeker een ander tijdslot kan kiezen.</p>
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px;">
+    <p style="margin:0;color:#999;font-size:12px;">Je ontvangt deze mail omdat een boeker een probleem heeft gemeld bij je laadpaal.</p>
+  </div>
+</body>
+</html>
+''';
+      try {
+        await supabase.functions.invoke('send-email', body: {
+          'to': ownerEmail,
+          'subject': ownerSubject,
+          'html': ownerHtml,
+        });
+      } catch (_) {/* best-effort */}
+    }
+
+    // 2) Notificatie naar info@pluggoapp.nl voor support log
+    final supportSubject = '[support] Probleem-melding: $categoryLabel';
+    final supportHtml = '''
+<div style="font-family:sans-serif;max-width:600px;color:#222;font-size:14px;line-height:1.5;">
+  <h2 style="margin:0 0 12px;">Probleem-melding boeker</h2>
+  <p style="margin:0;"><strong>Categorie:</strong> $categoryLabel</p>
+  <p style="margin:6px 0 0;"><strong>Boeker:</strong> $boekerNaam${boekerEmail.isEmpty ? '' : ' ($boekerEmail)'}</p>
+  <p style="margin:6px 0 0;"><strong>Paal:</strong> $chargerName${chargerAddress.isEmpty ? '' : ' — $chargerAddress'}</p>
+  <p style="margin:6px 0 0;"><strong>Eigenaar e-mail:</strong> ${ownerEmail ?? 'onbekend'}</p>
+  <p style="margin:6px 0 0;"><strong>Datum/tijd boeking:</strong> $datum, $start – $eind</p>
+  <p style="margin:6px 0 0;"><strong>Booking ID:</strong> ${booking.id}</p>
+  ${details.isEmpty ? '' : '<p style="margin:12px 0 0;"><strong>Toelichting:</strong><br>$details</p>'}
+</div>
+''';
+    try {
+      await supabase.functions.invoke('send-email', body: {
+        'to': 'info@pluggoapp.nl',
+        'subject': supportSubject,
+        'html': supportHtml,
+      });
+    } catch (_) {/* best-effort */}
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -7282,25 +7504,38 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                 ),
               ),
             ],
-            // Annuleer-knop tonen voor toekomstige bevestigde of nog
-            // openstaande aanvragen — niet voor afgelopen/al geannuleerde
-            // of geweigerde boekingen.
+            // Actiebalk: Iets is mis? + Annuleer / Aanvraag intrekken.
+            // Niet voor afgelopen/geannuleerde/geweigerde boekingen.
             if ((isUpcoming || isPending) && !isPast) ...[
               const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: () => _cancel(booking),
-                  icon: const Icon(Icons.close_rounded, size: 16),
-                  label: Text(isPending ? 'Aanvraag intrekken' : 'Annuleren'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.danger,
-                    textStyle: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _reportProblem(booking),
+                    icon: const Icon(Icons.report_outlined, size: 16),
+                    label: const Text('Iets is mis?'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFE0A030),
+                      textStyle: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
+                  TextButton.icon(
+                    onPressed: () => _cancel(booking),
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: Text(isPending ? 'Aanvraag intrekken' : 'Annuleren'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                      textStyle: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
             // Afgelopen + bevestigd → review actie tonen
@@ -9319,6 +9554,26 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
                 ),
               ),
             ),
+            // Confirmed + nog niet voorbij → eigenaar kan annuleren
+            // (alleen als het echt niet door kan gaan; chat is voor losse opmerkingen)
+            if (b.status == 'confirmed' && !isPast) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _cancelAsOwner(b),
+                  icon: const Icon(Icons.close_rounded, size: 16),
+                  label: const Text('Annuleer boeking'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.danger,
+                    textStyle: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
             // Pending → Accepteer + Weiger knoppen
             if (isPending) ...[
               const SizedBox(height: 14),
@@ -9574,6 +9829,183 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
       );
     } catch (_) {
       // E-mail is best-effort; in-app status is leidend.
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // Eigenaar annuleert een al-bevestigde boeking.
+  // Vraagt om een optionele reden, zet status op 'cancelled' en mailt
+  // de boeker via de send-email edge function.
+  // ----------------------------------------------------------------
+  Future<void> _cancelAsOwner(Booking b) async {
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Text('Boeking annuleren?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'De boeker krijgt direct bericht dat je deze boeking hebt '
+              'geannuleerd. Doe dit alleen als het echt niet door kan gaan — '
+              'voor losse opmerkingen kun je beter chatten.',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              style: GoogleFonts.inter(fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Reden (optioneel, komt in de mail)',
+                hintStyle: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                ),
+                filled: true,
+                fillColor: AppColors.background,
+                contentPadding: const EdgeInsets.all(12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Toch niet'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Ja, annuleer',
+              style: TextStyle(color: AppColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final reason = reasonCtrl.text.trim();
+    try {
+      await supabase
+          .from('bookings')
+          .update({'status': 'cancelled'})
+          .eq('id', b.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Boeking geannuleerd. ${b.userName ?? "De boeker"} krijgt bericht.',
+          ),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _load();
+      // Fire-and-forget mail naar boeker
+      _sendCancelEmailToBooker(b, reason.isEmpty ? null : reason);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon niet annuleren: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // Stuur de boeker een e-mail bij een door-eigenaar-annulering.
+  // Gebruikt dezelfde send-email edge function (Resend) als de
+  // accept/reject mail. Fire-and-forget.
+  // ----------------------------------------------------------------
+  Future<void> _sendCancelEmailToBooker(Booking b, String? reason) async {
+    final to = b.userEmail;
+    if (to == null || to.isEmpty) return;
+
+    final chargerName = b.charger?.name ?? 'de laadpaal';
+    final chargerAddress = b.charger?.address ?? '';
+    final boekerNaam = b.userName?.split(' ').first ?? 'daar';
+
+    final datum = _formatDateHeader(b.startTime);
+    String two(int n) => n.toString().padLeft(2, '0');
+    final start = '${two(b.startTime.hour)}:${two(b.startTime.minute)}';
+    final eind = '${two(b.endTime.hour)}:${two(b.endTime.minute)}';
+
+    final subject = 'Je boeking bij $chargerName is geannuleerd';
+
+    final adresRegel = chargerAddress.isEmpty
+        ? ''
+        : '<tr><td style="padding:6px 0;color:#666;">Adres</td><td style="padding:6px 0;font-weight:500;">$chargerAddress</td></tr>';
+
+    final redenBlok = (reason == null || reason.isEmpty)
+        ? ''
+        : '''
+<div style="background:#FFF8E1;border-left:4px solid #F9A825;padding:14px 18px;margin:0 0 24px;border-radius:6px;">
+  <p style="margin:0 0 4px;color:#7A5A00;font-size:13px;font-weight:600;">Reden van de eigenaar</p>
+  <p style="margin:0;color:#333;font-size:14px;line-height:1.5;">$reason</p>
+</div>''';
+
+    final html = '''
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px;">
+    <h1 style="margin:0 0 8px;color:#1976D2;font-size:24px;">Pluggo</h1>
+    <p style="margin:0 0 24px;color:#666;font-size:14px;">Buren laden bij buren</p>
+
+    <h2 style="margin:0 0 16px;font-size:20px;color:#222;">Hoi $boekerNaam,</h2>
+
+    <div style="background:#FFEBEE;border-left:4px solid #C62828;padding:16px 20px;margin:0 0 24px;border-radius:6px;">
+      <p style="margin:0;color:#B71C1C;font-size:16px;font-weight:600;">Geannuleerd</p>
+      <p style="margin:4px 0 0;color:#B71C1C;font-size:14px;">De eigenaar heeft je bevestigde boeking geannuleerd. Sorry voor het ongemak — kijk in de app voor een ander tijdslot of een andere paal in de buurt.</p>
+    </div>
+
+    $redenBlok
+
+    <table style="width:100%;border-collapse:collapse;font-size:14px;color:#222;margin:0 0 24px;">
+      <tr><td style="padding:6px 0;color:#666;width:90px;">Paal</td><td style="padding:6px 0;font-weight:500;">$chargerName</td></tr>
+      $adresRegel
+      <tr><td style="padding:6px 0;color:#666;">Datum</td><td style="padding:6px 0;font-weight:500;">$datum</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Tijd</td><td style="padding:6px 0;font-weight:500;">$start – $eind</td></tr>
+    </table>
+
+    <p style="margin:0 0 8px;color:#444;font-size:14px;">Open de Pluggo-app om een ander moment of paal te kiezen.</p>
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px;">
+    <p style="margin:0;color:#999;font-size:12px;">Je ontvangt deze mail omdat de eigenaar je boeking heeft geannuleerd.</p>
+  </div>
+</body>
+</html>
+''';
+
+    try {
+      await supabase.functions.invoke(
+        'send-email',
+        body: {
+          'to': to,
+          'subject': subject,
+          'html': html,
+        },
+      );
+    } catch (_) {
+      // best-effort; in-app status is leidend
     }
   }
 }
