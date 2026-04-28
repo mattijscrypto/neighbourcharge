@@ -34,7 +34,24 @@ const String termsOfServiceUrl = 'https://pluggoapp.nl/terms.html';
 // Pas deze datum aan als de launch verschuift.
 // ============================================
 final DateTime bookingsGoLiveAt = DateTime(2026, 7, 1);
-bool get bookingsAreLive => !DateTime.now().isBefore(bookingsGoLiveAt);
+
+// Apple-reviewer bypass — tijdens App Review moet de Apple-tester het
+// volledige boekingsflow kunnen doorlopen, ook al zitten we nog vóór de
+// publieke launchdatum. Wanneer de tester inlogt met onderstaande
+// e-mailaccount (vooraf aangemaakt in Supabase Auth), wordt de date-gate
+// genegeerd en gedraagt de app zich alsof boekingen al live zijn.
+// Na launch op [bookingsGoLiveAt] heeft deze constante geen effect meer.
+const String reviewBypassEmail = 'apple-review@pluggoapp.nl';
+
+bool get bookingsAreLive {
+  try {
+    final email = Supabase.instance.client.auth.currentUser?.email;
+    if (email == reviewBypassEmail) return true;
+  } catch (_) {
+    // Supabase nog niet geïnitialiseerd — val terug op de date-gate
+  }
+  return !DateTime.now().isBefore(bookingsGoLiveAt);
+}
 // Hoeveel hele dagen tot de launch, in datums (dus niet uren). Op 30 juni
 // staat er "over 1 dag" en op 1 juli "vandaag!", ook al is het 23:59.
 int get daysUntilLaunch {
