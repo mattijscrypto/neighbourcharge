@@ -3099,7 +3099,34 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
             ),
             priceFeedback(_priceController),
             const SizedBox(height: 20),
-            _label('Type aansluiting'),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  const Text(
+                    'Type aansluiting',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: () => showConnectorTypeInfo(context),
+                    borderRadius: BorderRadius.circular(20),
+                    child: const Padding(
+                      padding: EdgeInsets.all(2),
+                      child: Icon(
+                        Icons.info_outline,
+                        size: 18,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             Row(
               children: ['Type 2', 'CCS', 'CHAdeMO'].map((type) {
                 final selected = _selectedType == type;
@@ -3797,7 +3824,34 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
             ),
             priceFeedback(_priceController),
             const SizedBox(height: 20),
-            _label('Type aansluiting'),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  const Text(
+                    'Type aansluiting',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: () => showConnectorTypeInfo(context),
+                    borderRadius: BorderRadius.circular(20),
+                    child: const Padding(
+                      padding: EdgeInsets.all(2),
+                      child: Icon(
+                        Icons.info_outline,
+                        size: 18,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             Row(
               children: ['Type 2', 'CCS', 'CHAdeMO'].map((type) {
                 final selected = _selectedType == type;
@@ -4569,6 +4623,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     label: 'Aansluiting',
                     value: charger.type,
                     color: const Color(0xFF5C6BC0),
+                    onTap: () => showConnectorTypeInfo(context),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -10945,36 +11000,176 @@ class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
+  final VoidCallback? onTap;
 
   const _InfoTile({
     required this.icon,
     required this.label,
     required this.value,
     required this.color,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final tile = Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
       ),
       padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
         children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(height: 8),
+              Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+              ),
+            ],
           ),
+          if (onTap != null)
+            Positioned(
+              top: -2,
+              right: -2,
+              child: Icon(Icons.info_outline, size: 14, color: Colors.grey.shade400),
+            ),
         ],
       ),
+    );
+    if (onTap == null) return tile;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: tile,
+    );
+  }
+}
+
+/// Toont een bottom sheet met uitleg over de drie aansluiting-types
+/// (Type 2, CCS, CHAdeMO). Aanroepbaar vanuit paal-toevoegen, paal-bewerken
+/// en paal-detail.
+void showConnectorTypeInfo(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const Text(
+              'Welke aansluiting heb ik?',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+            ),
+            const SizedBox(height: 16),
+            _ConnectorRow(
+              name: 'Type 2',
+              description:
+                  'De Europese standaard voor wisselstroom-laden. Vrijwel alle privé-laadpalen én vrijwel alle EV\'s in Nederland gebruiken Type 2.',
+              isPrimary: true,
+            ),
+            const SizedBox(height: 12),
+            _ConnectorRow(
+              name: 'CCS',
+              description:
+                  'Voor snelladen met gelijkstroom (DC). Vooral te vinden bij publieke snellaadstations langs de snelweg, zelden bij thuispalen.',
+            ),
+            const SizedBox(height: 12),
+            _ConnectorRow(
+              name: 'CHAdeMO',
+              description:
+                  'Een oudere DC-snellaadstandaard, vooral op oudere Nissan- en Mitsubishi-modellen. Wordt langzaam uitgefaseerd.',
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.lightbulb_outline, color: AppColors.primary, size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Twijfel je? Kijk naar de stekker van je laadkabel — bijna elke Europese EV heeft Type 2.',
+                      style: TextStyle(fontSize: 13, color: AppColors.textPrimary, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _ConnectorRow extends StatelessWidget {
+  final String name;
+  final String description;
+  final bool isPrimary;
+
+  const _ConnectorRow({
+    required this.name,
+    required this.description,
+    this.isPrimary = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: isPrimary ? AppColors.primary : Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            name,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isPrimary ? Colors.white : AppColors.textPrimary,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            description,
+            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.45),
+          ),
+        ),
+      ],
     );
   }
 }
