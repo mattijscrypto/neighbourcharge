@@ -33,10 +33,10 @@ const String termsOfServiceUrl = 'https://pluggoapp.nl/terms.html';
 // melding op de launch dag (zie Supabase scheduled function).
 // Pas deze datum aan als de launch verschuift.
 // ============================================
-final DateTime bookingsGoLiveAt = DateTime(2026, 6, 1);
+final DateTime bookingsGoLiveAt = DateTime(2026, 7, 1);
 bool get bookingsAreLive => !DateTime.now().isBefore(bookingsGoLiveAt);
-// Hoeveel hele dagen tot de launch, in datums (dus niet uren). Op 31 mei
-// staat er "over 1 dag" en op 1 juni "vandaag!", ook al is het 23:59.
+// Hoeveel hele dagen tot de launch, in datums (dus niet uren). Op 30 juni
+// staat er "over 1 dag" en op 1 juli "vandaag!", ook al is het 23:59.
 int get daysUntilLaunch {
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
@@ -48,7 +48,7 @@ int get daysUntilLaunch {
   final diff = launchDay.difference(today).inDays;
   return diff < 0 ? 0 : diff;
 }
-const String launchDateLabel = '1 juni 2026';
+const String launchDateLabel = '1 juli 2026';
 
 // ============================================
 // Design tokens - centrale plek voor kleuren/styling
@@ -2433,7 +2433,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 12),
                     // Pre-launch banner — alleen zichtbaar zolang
                     // bookingsAreLive == false. Toont aan iedereen die
-                    // de palenlijst opent dat boekingen op 1 juni open gaan.
+                    // de palenlijst opent dat boekingen op 1 juli open gaan.
                     if (!bookingsAreLive)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -11269,7 +11269,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              // Vóór 1 juni: launch-banner zodat nieuwe downloaders zien
+              // Vóór 1 juli: launch-banner zodat nieuwe downloaders zien
               // dat ze een seintje krijgen als ze nu vast een account
               // aanmaken. Verdwijnt automatisch zodra de launch live is.
               if (!bookingsAreLive) ...[
@@ -11500,7 +11500,7 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 20),
               // Pre-launch banner — gebruikers die nu vast registreren
-              // krijgen een seintje zodra boekingen open gaan op 1 juni.
+              // krijgen een seintje zodra boekingen open gaan op 1 juli.
               if (!bookingsAreLive) ...[
                 const LaunchCountdownBanner(showAccountHint: true),
                 const SizedBox(height: 20),
