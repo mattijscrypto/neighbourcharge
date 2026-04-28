@@ -268,6 +268,124 @@ Widget freeVendInfo() {
 }
 
 // ============================================
+// _cableSelector — twee-knops keuze: paal-met-kabel óf zelf-meebrengen.
+// Belangrijk voor laders zodat ze weten of ze hun eigen kabel mee moeten.
+// ============================================
+Widget _cableSelector({
+  required bool value,
+  required ValueChanged<bool> onChanged,
+}) {
+  Widget option({
+    required bool selected,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? Colors.white : AppColors.textPrimary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: selected ? Colors.white : AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  return Row(
+    children: [
+      option(
+        selected: value == true,
+        icon: Icons.cable_rounded,
+        label: 'Met kabel',
+        onTap: () => onChanged(true),
+      ),
+      const SizedBox(width: 8),
+      option(
+        selected: value == false,
+        icon: Icons.power_outlined,
+        label: 'Zelf meebrengen',
+        onTap: () => onChanged(false),
+      ),
+    ],
+  );
+}
+
+// ============================================
+// _accessTypePicker — keuzelijst voor hoe een lader op de plek komt.
+// Vijf opties; gebruikt Wrap zodat het op kleine schermen netjes afbreekt.
+// ============================================
+Widget _accessTypePicker({
+  required String selected,
+  required ValueChanged<String> onChanged,
+}) {
+  final entries = kAccessTypeLabels.entries.toList();
+  return Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    children: entries.map((e) {
+      final isSelected = e.key == selected;
+      return GestureDetector(
+        onTap: () => onChanged(e.key),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.primary : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                kAccessTypeIcons[e.key] ?? Icons.help_outline,
+                size: 16,
+                color: isSelected ? Colors.white : AppColors.textPrimary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                e.value,
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: isSelected ? Colors.white : AppColors.textPrimary,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }).toList(),
+  );
+}
+
+// ============================================
 // LaunchCountdownBanner — herbruikbare oranje banner die op meerdere
 // plekken in de app uitlegt dat boekingen pas vanaf [bookingsGoLiveAt]
 // open gaan. Toont automatisch niets meer zodra die datum is bereikt.
@@ -440,6 +558,8 @@ class Charger {
   final String? ownerId;
   final String? ownerEmail;
   final List<String> photoUrls;
+  final bool cableIncluded;
+  final String accessType; // 'open', 'gate_code', 'doorbell', 'key', 'other'
 
   const Charger({
     required this.id,
@@ -455,6 +575,8 @@ class Charger {
     this.ownerId,
     this.ownerEmail,
     this.photoUrls = const [],
+    this.cableIncluded = true,
+    this.accessType = 'open',
   });
 
   // Van een database-rij (Map) naar een Charger-object
@@ -480,9 +602,28 @@ class Charger {
       ownerId: map['owner_id'] as String?,
       ownerEmail: map['owner_email'] as String?,
       photoUrls: photos,
+      cableIncluded: map['cable_included'] as bool? ?? true,
+      accessType: map['access_type'] as String? ?? 'open',
     );
   }
 }
+
+// Display-labels en iconen voor access_type (één bron van waarheid).
+const Map<String, String> kAccessTypeLabels = {
+  'open': 'Vrij toegankelijk',
+  'gate_code': 'Hek met code',
+  'doorbell': 'Aanbellen bij aankomst',
+  'key': 'Sleutel afhalen',
+  'other': 'Anders (zie instructies)',
+};
+
+const Map<String, IconData> kAccessTypeIcons = {
+  'open': Icons.home_outlined,
+  'gate_code': Icons.lock_outline,
+  'doorbell': Icons.doorbell_outlined,
+  'key': Icons.key_outlined,
+  'other': Icons.more_horiz_rounded,
+};
 
 // Data model voor een beschikbaarheidsblok (wekelijks terugkerend)
 class AvailabilitySlot {
@@ -2658,6 +2799,8 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
   final _instructionsController = TextEditingController();
   String _selectedType = 'Type 2';
   bool _isSolar = false;
+  bool _cableIncluded = true;
+  String _accessType = 'open';
   bool _saving = false;
 
   // Foto-upload state
@@ -2823,6 +2966,8 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
             'type': _selectedType,
             'available': true,
             'solar': _isSolar,
+            'cable_included': _cableIncluded,
+            'access_type': _accessType,
             'lat': coords.latitude,
             'lng': coords.longitude,
             'description': _descriptionController.text.trim(),
@@ -2980,6 +3125,18 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
                   ),
                 );
               }).toList(),
+            ),
+            const SizedBox(height: 20),
+            _label('Kabel'),
+            _cableSelector(
+              value: _cableIncluded,
+              onChanged: (v) => setState(() => _cableIncluded = v),
+            ),
+            const SizedBox(height: 20),
+            _label('Toegang tot de plek'),
+            _accessTypePicker(
+              selected: _accessType,
+              onChanged: (v) => setState(() => _accessType = v),
             ),
             const SizedBox(height: 20),
             freeVendInfo(),
@@ -3248,6 +3405,8 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
   late String _selectedType;
   late bool _isSolar;
   late bool _isAvailable;
+  late bool _cableIncluded;
+  late String _accessType;
 
   // Bestaande foto-URLs uit de database (die we kunnen verwijderen)
   late List<String> _existingPhotoUrls;
@@ -3275,6 +3434,8 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
     _selectedType = c.type;
     _isSolar = c.solar;
     _isAvailable = c.available;
+    _cableIncluded = c.cableIncluded;
+    _accessType = c.accessType;
     _existingPhotoUrls = List.of(c.photoUrls);
     _originalAddress = c.address;
   }
@@ -3459,6 +3620,8 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
         'type': _selectedType,
         'available': _isAvailable,
         'solar': _isSolar,
+        'cable_included': _cableIncluded,
+        'access_type': _accessType,
         'description': _descriptionController.text.trim(),
         'instructions': _instructionsController.text.trim(),
         'photo_urls': finalPhotoUrls,
@@ -3667,6 +3830,18 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
                   ),
                 );
               }).toList(),
+            ),
+            const SizedBox(height: 20),
+            _label('Kabel'),
+            _cableSelector(
+              value: _cableIncluded,
+              onChanged: (v) => setState(() => _cableIncluded = v),
+            ),
+            const SizedBox(height: 20),
+            _label('Toegang tot de plek'),
+            _accessTypePicker(
+              selected: _accessType,
+              onChanged: (v) => setState(() => _accessType = v),
             ),
             const SizedBox(height: 20),
             freeVendInfo(),
@@ -4442,6 +4617,10 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ),
             const SizedBox(height: 16),
+            // === Praktisch-kaart (kabel + toegang) — altijd zichtbaar zodat
+            // de boeker vóór z'n boeking weet wat hem te wachten staat ===
+            _practicalCard(),
+            const SizedBox(height: 16),
             // === Instructies-kaart (alleen zichtbaar voor eigenaar of bevestigde boeker) ===
             if (charger.instructions.isNotEmpty &&
                 (_isOwner || _hasActiveBooking)) ...[
@@ -4535,6 +4714,90 @@ class _DetailScreenState extends State<DetailScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // Kaart met praktische info (kabel + toegang) — altijd zichtbaar,
+  // ook vóór de boeking, zodat een potentiële boeker weet of hij een
+  // kabel mee moet brengen en hoe hij op de plek komt.
+  Widget _practicalCard() {
+    final accessLabel = kAccessTypeLabels[charger.accessType] ?? '—';
+    final accessIcon = kAccessTypeIcons[charger.accessType] ?? Icons.help_outline;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Praktisch',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _practicalRow(
+            icon: charger.cableIncluded
+                ? Icons.cable_rounded
+                : Icons.power_outlined,
+            label: 'Kabel',
+            value: charger.cableIncluded
+                ? 'Met kabel — gewoon insteken'
+                : 'Geen kabel — neem je eigen kabel mee',
+          ),
+          const SizedBox(height: 10),
+          _practicalRow(
+            icon: accessIcon,
+            label: 'Toegang',
+            value: accessLabel,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _practicalRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: AppColors.primary),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimary,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
