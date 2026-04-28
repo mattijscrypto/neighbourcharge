@@ -8,7 +8,7 @@
 PRODUCT_NAME = Pluggo
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = nl.pluggoapp.app
+PRODUCT_BUNDLE_IDENTIFIER = nl.pluggoapp.pluggo
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 Pluggo. All rights reserved.
