@@ -68,6 +68,58 @@ int get daysUntilLaunch {
 const String launchDateLabel = '1 juli 2026';
 
 // ============================================
+// IBAN-helpers — voor uitbetalingen aan eigenaren via Mollie/SEPA.
+// Zonder geldige IBAN kunnen we de 95%-share niet doorbetalen, dus
+// blokkeren we het paal-toevoegen-flow tot er een IBAN op het profiel staat.
+// ============================================
+
+/// Heel pragmatische NL-IBAN-check: 18 tekens, begint met "NL", daarna
+/// 2 cijfers, 4 letters, 10 cijfers. We accepteren spaties bij invoer
+/// (die strippen we) maar geen andere landcodes — Pluggo betaalt voorlopig
+/// alleen Nederlandse rekeningen uit.
+bool isValidNlIban(String input) {
+  final cleaned = input.replaceAll(' ', '').toUpperCase();
+  final regex = RegExp(r'^NL\d{2}[A-Z]{4}\d{10}$');
+  return regex.hasMatch(cleaned);
+}
+
+/// Normaliseert IBAN naar uppercase zonder spaties — zo slaan we 'm op.
+String normalizeIban(String input) {
+  return input.replaceAll(' ', '').toUpperCase();
+}
+
+/// Mooi geformatteerde weergave: "NL12 ABCD 0123 4567 89".
+String prettyIban(String iban) {
+  final clean = iban.replaceAll(' ', '');
+  final buffer = StringBuffer();
+  for (var i = 0; i < clean.length; i++) {
+    if (i > 0 && i % 4 == 0) buffer.write(' ');
+    buffer.write(clean[i]);
+  }
+  return buffer.toString();
+}
+
+/// Haalt de IBAN op die in `profiles.iban` voor de huidige gebruiker staat.
+/// Returnt null als de gebruiker niet ingelogd is, geen profielrij heeft,
+/// of nog geen IBAN heeft ingevuld.
+Future<String?> fetchCurrentUserIban() async {
+  final userId = Supabase.instance.client.auth.currentUser?.id;
+  if (userId == null) return null;
+  try {
+    final row = await Supabase.instance.client
+        .from('profiles')
+        .select('iban')
+        .eq('id', userId)
+        .maybeSingle();
+    final iban = row?['iban'] as String?;
+    if (iban == null || iban.trim().isEmpty) return null;
+    return iban;
+  } catch (_) {
+    return null;
+  }
+}
+
+// ============================================
 // Design tokens - centrale plek voor kleuren/styling
 // ============================================
 class AppColors {
@@ -1533,6 +1585,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openAdd() async {
+    // IBAN-gate: eigenaren krijgen 95% van elke boeking, dus zonder IBAN
+    // kunnen we niet uitbetalen. Vraag 'm hier op vóórdat ze de paal-flow in mogen.
+    final ok = await ensureIbanOrPrompt(context);
+    if (!ok) return;
     final added = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -2799,6 +2855,62 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
+}
+
+// ============================================
+// ensureIbanOrPrompt — gate voor het paal-toevoegen-flow.
+// Returnt true als de gebruiker een IBAN heeft (of er net één heeft
+// ingevuld via de prompt). Returnt false als de gebruiker afziet —
+// dan blokkeren we het toevoegen.
+// ============================================
+Future<bool> ensureIbanOrPrompt(BuildContext context) async {
+  final iban = await fetchCurrentUserIban();
+  if (iban != null) return true;
+  if (!context.mounted) return false;
+
+  // Vraag toestemming om door te gaan naar het profielscherm.
+  final goToProfile = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text('IBAN nodig'),
+      content: const Text(
+        'Om een paal aan te bieden hebben we je IBAN nodig. '
+        'Pluggo int de betalingen van boekers en stort jouw aandeel '
+        '(95%) elke 14 dagen op je rekening.\n\n'
+        'Wil je je IBAN nu invullen?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Later'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Invullen'),
+        ),
+      ],
+    ),
+  );
+
+  if (goToProfile != true) return false;
+  if (!context.mounted) return false;
+
+  // Stuur door naar het profielscherm. Daar kunnen ze IBAN invullen
+  // en opslaan; bij terugkeer checken we opnieuw of er nu wél een IBAN is.
+  await Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+  );
+  final ibanAfter = await fetchCurrentUserIban();
+  return ibanAfter != null;
 }
 
 class AddChargerScreen extends StatefulWidget {
@@ -6780,6 +6892,9 @@ class _MyChargersScreenState extends State<MyChargersScreen> {
   }
 
   Future<void> _openAdd() async {
+    // IBAN-gate: zie AddChargerScreen-flow op home — zonder IBAN geen paal.
+    final ok = await ensureIbanOrPrompt(context);
+    if (!ok) return;
     final added = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => const AddChargerScreen()),
@@ -7689,7 +7804,9 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
+  late final TextEditingController _ibanController;
   bool _saving = false;
+  bool _loadingIban = true;
 
   // Huidige avatar-URL uit user_metadata (kan null zijn als niet gezet)
   String? _currentAvatarUrl;
@@ -7704,12 +7821,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameController = TextEditingController(
       text: (meta?['full_name'] as String?) ?? '',
     );
+    _ibanController = TextEditingController();
     _currentAvatarUrl = meta?['avatar_url'] as String?;
+    // IBAN staat in profiles.iban — niet in user_metadata. Async laden.
+    _loadIban();
+  }
+
+  Future<void> _loadIban() async {
+    final iban = await fetchCurrentUserIban();
+    if (!mounted) return;
+    setState(() {
+      if (iban != null) _ibanController.text = prettyIban(iban);
+      _loadingIban = false;
+    });
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _ibanController.dispose();
     super.dispose();
   }
 
@@ -7767,6 +7897,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           },
         ),
       );
+
+      // IBAN gaat naar de profiles-tabel (niet user_metadata): we hebben
+      // 'm later in edge functions nodig om payouts te triggeren, en
+      // willen 'm onder RLS-controle. Lege input = NULL opslaan.
+      final ibanInput = _ibanController.text.trim();
+      final ibanToSave =
+          ibanInput.isEmpty ? null : normalizeIban(ibanInput);
+      // Upsert: profielen worden normaal door handle_new_user-trigger
+      // aangemaakt, maar voor de zekerheid upserten we hier toch.
+      await supabase.from('profiles').upsert({
+        'id': userId,
+        'iban': ibanToSave,
+      });
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -7905,6 +8049,66 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     if (v.length < 2) return 'Minimaal 2 tekens';
                     return null;
                   },
+                ),
+                const SizedBox(height: 20),
+                // IBAN — verplicht voor wie een paal aanbiedt, optioneel
+                // voor wie alleen boekt. Validatie staat alleen aan zodra
+                // er iets getypt is, zodat boekers het veld leeg mogen laten.
+                Row(
+                  children: [
+                    Text(
+                      'IBAN',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.account_balance_outlined,
+                      size: 14,
+                      color: AppColors.textSecondary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _ibanController,
+                  textCapitalization: TextCapitalization.characters,
+                  enabled: !_loadingIban,
+                  decoration: InputDecoration(
+                    hintText: _loadingIban
+                        ? 'Laden…'
+                        : 'NL12 ABCD 0123 4567 89',
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                  validator: (value) {
+                    final v = (value ?? '').trim();
+                    if (v.isEmpty) return null; // optioneel
+                    if (!isValidNlIban(v)) {
+                      return 'Geen geldige Nederlandse IBAN';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Verplicht als je een laadpaal wilt aanbieden — '
+                  'op deze rekening krijg je je 95% uitbetaald.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 // E-mail (read-only)
