@@ -37,16 +37,24 @@ final DateTime bookingsGoLiveAt = DateTime(2026, 7, 1);
 
 // Apple-reviewer bypass — tijdens App Review moet de Apple-tester het
 // volledige boekingsflow kunnen doorlopen, ook al zitten we nog vóór de
-// publieke launchdatum. Wanneer de tester inlogt met onderstaande
-// e-mailaccount (vooraf aangemaakt in Supabase Auth), wordt de date-gate
+// publieke launchdatum. Wanneer een tester inlogt met een van onderstaande
+// e-mailaccounts (vooraf aangemaakt in Supabase Auth), wordt de date-gate
 // genegeerd en gedraagt de app zich alsof boekingen al live zijn.
-// Na launch op [bookingsGoLiveAt] heeft deze constante geen effect meer.
-const String reviewBypassEmail = 'apple-review@pluggoapp.nl';
+// Eerste entry is voor Apple zelf; de overige zijn voor onze interne
+// pre-launch tests (Mollie checkout, IBAN-prompt, etc.) zodat we het
+// Apple-account schoon kunnen houden — zonder IBAN, zonder palen — zodat
+// de reviewer zelf de IBAN-prompt en paal-upload-flow kan ervaren.
+// Na launch op [bookingsGoLiveAt] heeft deze lijst geen effect meer.
+const List<String> bypassEmails = [
+  'apple-review@pluggoapp.nl',
+  'm.sloothovenier@gmail.com',
+  'rakawakka@gmail.com',
+];
 
 bool get bookingsAreLive {
   try {
     final email = Supabase.instance.client.auth.currentUser?.email;
-    if (email == reviewBypassEmail) return true;
+    if (email != null && bypassEmails.contains(email)) return true;
   } catch (_) {
     // Supabase nog niet geïnitialiseerd — val terug op de date-gate
   }
@@ -117,6 +125,48 @@ Future<String?> fetchCurrentUserIban() async {
   } catch (_) {
     return null;
   }
+}
+
+// ============================================
+// Pricing helpers — must mirror the formula in supabase/functions/
+// create-payment/index.ts. Als je daar iets aanpast, hier ook.
+// ============================================
+
+/// Aanname voor laadsnelheid — zelfde waarde als in de edge function.
+/// 7,4 kW = standaard eenfase 32A home charger in NL.
+const double estimatedKwPerHour = 7.4;
+
+/// Service fee percentage — ook in T&Cs en FAQ.
+const double serviceFeeRate = 0.05;
+
+/// Schat het bedrag (in euro) dat een boeking gaat kosten op basis van
+/// duur × geschat kWh × prijs per kWh. Zelfde formule als de edge function,
+/// maar dan client-side zodat we 'm op de bookings-tile kunnen tonen
+/// vóórdat de gebruiker op "Betalen" tikt.
+double estimateBookingTotalEuro(Booking b) {
+  final charger = b.charger;
+  if (charger == null) return 0;
+  final hours = b.duration.inMinutes / 60.0;
+  if (hours <= 0) return 0;
+  // charger.price is een String ("0.30") — parsen naar double.
+  // Accepteer zowel "." als "," als decimaal-scheidingsteken voor de zekerheid.
+  final priceParsed =
+      double.tryParse(charger.price.replaceAll(',', '.')) ?? 0.0;
+  if (priceParsed <= 0) return 0;
+  final estimatedKwh = hours * estimatedKwPerHour;
+  return estimatedKwh * priceParsed;
+}
+
+/// Format een cent-bedrag naar "€12,34"-stijl voor UI-weergave.
+String formatEuroCents(int cents) {
+  final euros = (cents / 100).toStringAsFixed(2).replaceAll('.', ',');
+  return '€$euros';
+}
+
+/// Format een euro double naar "€12,34"-stijl.
+String formatEuroDouble(double euro) {
+  final s = euro.toStringAsFixed(2).replaceAll('.', ',');
+  return '€$s';
 }
 
 // ============================================
@@ -761,6 +811,10 @@ class Booking {
   final String? userName;
   final String? userEmail;
   final bool viewedByOwner;
+  // Payment-velden — toegevoegd in Mollie Fase 1.
+  // payment_status enum: 'unpaid' | 'pending' | 'paid' | 'failed' | 'refunded' | 'partially_refunded'
+  final String paymentStatus;
+  final int? totalAmountCents;
   // Optioneel: charger-info uit een joined query
   final Charger? charger;
 
@@ -775,6 +829,8 @@ class Booking {
     this.userName,
     this.userEmail,
     this.viewedByOwner = false,
+    this.paymentStatus = 'unpaid',
+    this.totalAmountCents,
     this.charger,
   });
 
@@ -796,11 +852,22 @@ class Booking {
       userName: map['user_name'] as String?,
       userEmail: map['user_email'] as String?,
       viewedByOwner: (map['viewed_by_owner'] as bool?) ?? false,
+      paymentStatus: (map['payment_status'] as String?) ?? 'unpaid',
+      totalAmountCents: map['total_amount_cents'] as int?,
       charger: charger,
     );
   }
 
   Duration get duration => endTime.difference(startTime);
+
+  /// True als de eigenaar de boeking heeft goedgekeurd én de boeker
+  /// nog moet betalen. Toont in de UI de "Betalen"-knop.
+  bool get awaitingPayment =>
+      status == 'confirmed' &&
+      (paymentStatus == 'unpaid' || paymentStatus == 'pending' ||
+          paymentStatus == 'failed');
+
+  bool get isPaid => paymentStatus == 'paid';
 }
 
 // Een review die een booker achterlaat na een afgelopen boeking.
@@ -7149,7 +7216,8 @@ class MyBookingsScreen extends StatefulWidget {
   State<MyBookingsScreen> createState() => _MyBookingsScreenState();
 }
 
-class _MyBookingsScreenState extends State<MyBookingsScreen> {
+class _MyBookingsScreenState extends State<MyBookingsScreen>
+    with WidgetsBindingObserver {
   List<Booking> _bookings = [];
   bool _loading = true;
   // IDs van boekingen waar deze gebruiker al een review voor heeft achtergelaten —
@@ -7159,7 +7227,25 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
   @override
   void initState() {
     super.initState();
+    // Luister naar lifecycle: als de app van background terugkeert (bijv.
+    // na een Mollie checkout in Safari), refreshen we de boekingen zodat
+    // payment_status meteen up-to-date is.
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed && mounted) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -7235,6 +7321,157 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
         ),
       );
     }
+  }
+
+  // ----------------------------------------------------------------
+  // Boeking afrekenen via Mollie. Roept de `create-payment` edge
+  // function aan, die een Mollie checkout-sessie opent en de URL
+  // teruggeeft. Daarna openen we die URL in de externe browser
+  // (zodat iDEAL native bank-apps geopend kunnen worden).
+  // ----------------------------------------------------------------
+  bool _processingPayment = false;
+
+  Future<void> _payForBooking(Booking booking) async {
+    // 1. Bevestig met inschatting van bedrag (zelfde formule als server).
+    final estimated = estimateBookingTotalEuro(booking);
+    final ownerShare = estimated * (1 - serviceFeeRate);
+    final fee = estimated - ownerShare;
+
+    if (!mounted) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Betalen via Mollie'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Geschatte kosten op basis van ${booking.duration.inHours} uur '
+              'laden bij ${estimatedKwPerHour.toString().replaceAll('.', ',')} kW:',
+              style: GoogleFonts.inter(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            _payRow('Totaal', formatEuroDouble(estimated), bold: true),
+            const SizedBox(height: 4),
+            _payRow('Naar de eigenaar (95%)', formatEuroDouble(ownerShare)),
+            _payRow('Pluggo servicefee (5%)', formatEuroDouble(fee)),
+            const SizedBox(height: 12),
+            Text(
+              'Je wordt naar Mollie gestuurd om met iDEAL of een andere '
+              'methode te betalen. Na de betaling kom je terug in de app.',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuleren'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Naar betaling'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _processingPayment = true);
+    try {
+      // 2. Roep de create-payment edge function aan.
+      final res = await supabase.functions.invoke(
+        'create-payment',
+        body: {'booking_id': booking.id},
+      );
+
+      // supabase.functions.invoke returnt een FunctionResponse met data
+      // (Map of String) en status. Bij non-2xx gooit 'ie geen exception,
+      // we moeten zelf checken.
+      final data = res.data;
+      if (res.status != null && res.status! >= 400) {
+        final msg = data is Map<String, dynamic>
+            ? (data['error'] as String? ?? 'Onbekende fout')
+            : 'Server fout (${res.status})';
+        throw Exception(msg);
+      }
+      if (data is! Map<String, dynamic>) {
+        throw Exception('Onverwacht antwoord van server');
+      }
+      final checkoutUrl = data['checkout_url'] as String?;
+      if (checkoutUrl == null || checkoutUrl.isEmpty) {
+        throw Exception('Geen checkout URL ontvangen');
+      }
+
+      // 3. Open Mollie checkout in externe browser. externalApplication
+      // is essentieel: native iDEAL apps kunnen alleen vanuit Safari/Chrome
+      // worden gelaunched, niet vanuit een in-app webview.
+      final uri = Uri.parse(checkoutUrl);
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        throw Exception('Kon checkout-pagina niet openen');
+      }
+
+      // 4. Na terugkeer (deep link of handmatig terug-tikken): refresh.
+      if (mounted) await _load();
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Betalen mislukt: $msg'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _processingPayment = false);
+    }
+  }
+
+  // Klein hulpwidget voor het bedrag-overzicht in de bevestigingsdialog.
+  Widget _payRow(String label, String value, {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+              color: bold ? AppColors.textPrimary : AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ----------------------------------------------------------------
@@ -7660,6 +7897,95 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                 ),
               ],
             ),
+            // Betalen — eigenaar heeft de boeking goedgekeurd, maar de
+            // boeker moet nog afrekenen. Toon prominente CTA met geschat
+            // bedrag. Verdwijnt zodra payment_status = 'paid'.
+            if (booking.awaitingPayment && !isPast) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _processingPayment
+                      ? null
+                      : () => _payForBooking(booking),
+                  icon: _processingPayment
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.payment_rounded, size: 18),
+                  label: Text(
+                    _processingPayment
+                        ? 'Bezig…'
+                        : 'Betalen — ${formatEuroDouble(estimateBookingTotalEuro(booking))}',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    textStyle: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                booking.paymentStatus == 'pending'
+                    ? "Betaling wordt verwerkt — je kunt 'm hier opnieuw afronden als 't onderbroken werd."
+                    : booking.paymentStatus == 'failed'
+                        ? 'Vorige betaalpoging mislukt. Probeer het opnieuw.'
+                        : 'Reservering is pas definitief na betaling.',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+            // Betaald — kleine groene check-bevestiging
+            if (booking.isPaid && !isPast) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      size: 14,
+                      color: AppColors.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      booking.totalAmountCents != null
+                          ? 'Betaald · ${formatEuroCents(booking.totalAmountCents!)}'
+                          : 'Betaald',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             // Bericht aan de eigenaar — altijd zichtbaar (ook na annuleren),
             // zodat boeker en eigenaar over en weer kunnen communiceren.
             if (charger?.ownerId != null) ...[
