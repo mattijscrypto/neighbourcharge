@@ -77,6 +77,22 @@
 			<string>comgooglemaps</string>
 			<string>maps</string>
 		</array>
+		<!-- pluggo:// URL scheme — Mollie checkout stuurt de gebruiker hierheen
+		     na betalen (zie create-payment edge function). Zonder deze entry
+		     opent iOS de pluggo:// link niet. -->
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
+				<string>nl.pluggoapp.pluggo</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>pluggo</string>
+				</array>
+			</dict>
+		</array>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>
