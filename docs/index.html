@@ -9,6 +9,25 @@
   <meta property="og:description" content="Het peer-to-peer laadnetwerk voor Nederland. Live op 1 juli 2026." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://pluggoapp.nl" />
+  <meta property="og:site_name" content="Pluggo" />
+  <meta property="og:locale" content="nl_NL" />
+  <meta property="og:image" content="https://pluggoapp.nl/og-image.jpg" />
+  <meta property="og:image:secure_url" content="https://pluggoapp.nl/og-image.jpg" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Pluggo — Deel je laadpaal met de buurt" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Pluggo — Deel je laadpaal met de buurt" />
+  <meta name="twitter:description" content="Het peer-to-peer laadnetwerk voor Nederland." />
+  <meta name="twitter:image" content="https://pluggoapp.nl/og-image.jpg" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#00A87E" />
   <style>
     :root {
       --primary: #00A87E;
@@ -834,12 +853,12 @@
 
       <details>
         <summary>Wat verdien ik als ik mijn paal deel?</summary>
-        <p>Dat bepaal je zelf — jij stelt je prijs per kWh in. Bij een paar laadsessies per week is €100 tot €200 per maand realistisch. Pluggo houdt een transparante servicefee van 5% in op elke boeking; de overige 95% wordt na afloop van de boeking aan jou uitbetaald op je opgegeven IBAN.</p>
+        <p>Dat bepaal je zelf — jij stelt je prijs per kWh in. Bij een paar laadsessies per week is €100 tot €200 per maand realistisch. Pluggo houdt een transparante servicefee van €0,03 per kWh aan beide kanten in: de boeker betaalt €0,03/kWh extra bovenop jouw paalprijs, en op de uitbetaling aan jou wordt nog eens €0,03/kWh in mindering gebracht. Voorbeeld: stel je je paal in op €0,30/kWh, dan betaalt de boeker €0,33/kWh en ontvang jij €0,27/kWh op je IBAN.</p>
       </details>
 
       <details>
         <summary>Hoe werkt betalen?</summary>
-        <p>Bij het bevestigen van een boeking betaal je het volledige bedrag direct in de app, via betaaldienstverlener Mollie. Je kunt afrekenen met iDEAL, creditcard of Apple/Google Pay. Het bedrag bestaat uit het tarief dat de eigenaar instelt (per kWh of per tijdslot) plus een servicefee van 5% van Pluggo. Geen abonnement, geen verborgen kosten — wat je ziet is wat je betaalt.</p>
+        <p>Pluggo werkt op basis van werkelijk afgenomen kWh: na de laadbeurt vult de eigenaar in hoeveel je hebt geladen, en daarna ontvang je een betaalverzoek voor het exacte bedrag. Je rekent dan af in de app via betaaldienstverlener Mollie — met iDEAL, creditcard of Apple/Google Pay. Het tarief dat je per kWh ziet is altijd de all-in prijs: paalprijs plus €0,03/kWh servicefee. Geen abonnement, geen verborgen kosten — wat je ziet is wat je betaalt.</p>
       </details>
 
       <details>
@@ -865,7 +884,7 @@
 
       <details>
         <summary>Wat kost het voor laders?</summary>
-        <p>Je betaalt het tarief dat de eigenaar instelt, plus een servicefee van 5% van Pluggo. In de praktijk vaak nog steeds 25–45% goedkoper dan een commerciële snellader, zonder zoek- en wachttijd, en zonder abonnement of laadpas.</p>
+        <p>Je betaalt het tarief dat de eigenaar instelt, plus een vaste servicefee van €0,03 per kWh van Pluggo. De all-in prijs zie je direct bij de paal, dus geen verrassingen. In de praktijk vaak nog steeds 25–45% goedkoper dan een commerciële snellader, zonder zoek- en wachttijd, en zonder abonnement of laadpas.</p>
       </details>
 
       <details>
@@ -900,13 +919,13 @@
 
       <details>
         <summary>Mag ik op het laatste moment annuleren?</summary>
-        <p>Ja — zolang je boeking nog niet is begonnen, kun je in de app annuleren. Onze regels zijn helder:</p>
+        <p>Ja — zolang je boeking nog niet is begonnen, kun je in de app annuleren. Omdat je bij Pluggo pas betaalt nadat de eigenaar het werkelijk afgenomen kWh heeft ingevuld, hoeft er bij een annulering vóór het laden niets in rekening te worden gebracht of terugbetaald. Concreet:</p>
         <ul>
-          <li><strong>Meer dan 24 uur vóór de start:</strong> 100% terug, inclusief de servicefee.</li>
-          <li><strong>Binnen 24 uur vóór de start of niet komen opdagen:</strong> geen terugbetaling — het bedrag gaat naar de eigenaar als compensatie voor de gereserveerde tijd.</li>
-          <li><strong>Annuleert de eigenaar zelf?</strong> Dan krijg je het volledige bedrag terug, ongeacht de timing.</li>
+          <li><strong>Annuleer je vóór de start van het tijdslot?</strong> De reservering vervalt en het tijdslot komt weer beschikbaar voor anderen. Geen kosten.</li>
+          <li><strong>Kom je niet opdagen?</strong> Dan vult de eigenaar geen kWh in en wordt er ook niets in rekening gebracht. Wel vragen we je dat te vermijden — herhaaldelijke no-shows kunnen leiden tot opschorting van je account.</li>
+          <li><strong>Annuleert de eigenaar zelf een bevestigde boeking?</strong> Dan krijg je direct bericht zodat je een ander tijdslot of een andere paal kunt kiezen. Je hebt nog niets betaald, dus er is niets terug te betalen.</li>
         </ul>
-        <p>Eigenaars kunnen een al-bevestigde boeking annuleren als er iets onverwachts tussenkomt; in dat geval krijg je direct bericht zodat je een ander tijdslot of een andere paal kunt kiezen.</p>
+        <p>Is een laadbeurt wél uitgevoerd en is er een betaalverzoek verstuurd, maar klopt er iets niet (bv. een te hoog ingevuld kWh-aantal of een paal die niet goed werkte)? Tik dan op <strong>"Iets is mis?"</strong> bij je boeking. We kijken mee en helpen bij het corrigeren of het volledig terugdraaien van de betaling.</p>
       </details>
 
       <details>
