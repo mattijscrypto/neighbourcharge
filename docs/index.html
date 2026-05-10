@@ -278,6 +278,29 @@
       margin-bottom: 20px;
       color: #2A302D;
     }
+    .story-text ul {
+      list-style: none;
+      padding: 0;
+      margin: 24px 0 0;
+    }
+    .story-text ul li {
+      position: relative;
+      padding-left: 28px;
+      font-size: 17px;
+      line-height: 1.6;
+      color: #2A302D;
+      margin-bottom: 14px;
+    }
+    .story-text ul li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--brand);
+    }
     /* ---------- PROBLEM CARDS ---------- */
     .grid-3 {
       display: grid;
@@ -624,20 +647,20 @@
   <section class="alt-bg" id="verhaal">
     <div class="section-inner section-narrow">
       <div class="eyebrow">Over Pluggo</div>
-      <h2>We hebben in Nederland geen tekort aan laadpalen — we hebben een verdelingsprobleem.</h2>
+      <h2>Het peer-to-peer laadnetwerk van Nederland.</h2>
       <div class="story-text">
         <p>
-          In veel straten staan tien laadpalen op privé-opritten, terwijl de helft van de mensen die langsrijdt geen plek heeft om thuis te laden. Pluggo lost dat op: een peer-to-peer laadnetwerk waar je je privélaadpaal deelt met de buurt, of een paal in de buurt vindt voor minder dan een publieke.
+          Pluggo verbindt mensen met een privélaadpaal aan mensen die er één nodig hebben. Net zoals Airbnb dat doet voor logeerkamers — maar dan voor de paal naast je voordeur.
         </p>
-        <p>
-          De eigenaar bepaalt zelf de prijs en wanneer 'ie beschikbaar is. De boeker betaalt achteraf precies de kWh die hij heeft afgenomen — geen abonnementen, geen verrassingen.
-        </p>
-        <p>
-          Wat het verandert: mensen zonder oprit kunnen eindelijk de overstap naar elektrisch maken. Eigenaars verdienen aan een paal die anders 80% van de tijd stilstaat (en aan hun zonnestroom — nu saldering wegvalt). Bedrijven met laadpalen op eigen terrein kunnen via SPRILA tot 40% terugkrijgen wanneer ze openstellen via Pluggo. En spreiding van laden over de dag verlicht de avondpiek.
-        </p>
-        <p>
-          We lossen het laadtekort op zoals we in Nederland elk groot probleem oplossen: door het slim te delen.
-        </p>
+        <ul>
+          <li>Deel je privélaadpaal met de buurt op de tijden dat 'ie tóch leegstaat</li>
+          <li>Vind een laadplek dichtbij, vaak goedkoper dan een publieke</li>
+          <li>Eigenaar bepaalt zelf de prijs en de beschikbaarheid</li>
+          <li>Betaal exact het aantal kWh dat je hebt afgenomen</li>
+          <li>Geen abonnementen, geen vaste kosten</li>
+          <li>Verdien tegelijk aan je zonnestroom — nu saldering wegvalt</li>
+          <li>Helpt netcongestie door laden over de dag te spreiden</li>
+        </ul>
       </div>
     </div>
   </section>
