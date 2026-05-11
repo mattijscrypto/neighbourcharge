@@ -23,11 +23,56 @@
   <meta name="twitter:description" content="Het peer-to-peer laadnetwerk voor Nederland." />
   <meta name="twitter:image" content="https://pluggoapp.nl/og-image.jpg" />
 
+  <link rel="canonical" href="https://pluggoapp.nl/" />
+
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   <meta name="theme-color" content="#00A87E" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://pluggoapp.nl/#organization",
+        "name": "Pluggo",
+        "url": "https://pluggoapp.nl/",
+        "logo": "https://pluggoapp.nl/favicon.svg",
+        "description": "Het peer-to-peer laadnetwerk van Nederland. Eigenaars verdienen aan hun privélaadpaal, laders vinden goedkoper laden in de buurt.",
+        "email": "info@pluggoapp.nl",
+        "areaServed": {
+          "@type": "Country",
+          "name": "Netherlands"
+        }
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://pluggoapp.nl/#website",
+        "url": "https://pluggoapp.nl/",
+        "name": "Pluggo",
+        "publisher": { "@id": "https://pluggoapp.nl/#organization" },
+        "inLanguage": "nl-NL"
+      },
+      {
+        "@type": "MobileApplication",
+        "name": "Pluggo",
+        "operatingSystem": "iOS, Android",
+        "applicationCategory": "TravelApplication",
+        "description": "Deel je privélaadpaal met de buurt of vind een paal in de buurt voor minder dan een publieke. Eigenaar bepaalt de prijs, boeker betaalt exact de kWh die hij heeft afgenomen.",
+        "url": "https://pluggoapp.nl/",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "EUR"
+        },
+        "publisher": { "@id": "https://pluggoapp.nl/#organization" }
+      }
+    ]
+  }
+  </script>
   <style>
     :root {
       --primary: #00A87E;
