@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Word Pluggo Pionier — Eerste 100 paaleigenaren in Nederland</title>
+  <meta name="description" content="De eerste 100 paaleigenaren die hun privélaadpaal aan Pluggo toevoegen krijgen permanent de Pluggo Pionier-status. App vanaf 1 juni 2026 in App Store en Google Play, boekingen open vanaf 1 juli 2026." />
+  <meta property="og:title" content="Word Pluggo Pionier — Eerste 100 paaleigenaren in Nederland" />
+  <meta property="og:description" content="App vanaf 1 juni 2026 in App Store en Google Play. Word een van de eerste 100 paaleigenaren en behoud die status permanent." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://pluggoapp.nl/pioniers" />
+  <meta property="og:site_name" content="Pluggo" />
+  <meta property="og:locale" content="nl_NL" />
+  <meta property="og:image" content="https://pluggoapp.nl/og-image.jpg" />
+  <meta property="og:image:secure_url" content="https://pluggoapp.nl/og-image.jpg" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Pluggo — Word Pionier" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Word Pluggo Pionier — Eerste 100 paaleigenaren" />
+  <meta name="twitter:description" content="App vanaf 1 juni 2026 in App Store en Google Play." />
+  <meta name="twitter:image" content="https://pluggoapp.nl/og-image.jpg" />
+
+  <link rel="canonical" href="https://pluggoapp.nl/pioniers" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#00A87E" />
+
+  <style>
+    :root {
+      --primary: #00A87E;
+      --primary-dark: #0B6B3A;
+      --primary-light: #E8F7F1;
+      --accent: #FFB547;
+      --gold: #C9952B;
+      --gold-light: #FFF6E0;
+      --text: #1A1F1C;
+      --muted: #5C6B63;
+      --border: #E4EBE7;
+      --bg: #FAFBFA;
+      --bg-soft: #F2F6F3;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      font-size: 17px;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--primary-dark); }
+
+    /* ---------- NAV ---------- */
+    nav {
+      position: sticky;
+      top: 0;
+      background: rgba(250, 251, 250, 0.92);
+      backdrop-filter: saturate(180%) blur(12px);
+      -webkit-backdrop-filter: saturate(180%) blur(12px);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+    .nav-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .nav-logo .mark {
+      width: 32px;
+      height: 32px;
+      background: var(--primary);
+      border-radius: 9px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .nav-logo .name {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.01em;
+    }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-weight: 500;
+      margin-left: 24px;
+      font-size: 15px;
+    }
+    .nav-links a:hover { color: var(--text); }
+    @media (max-width: 600px) {
+      .nav-links a:not(.nav-cta) { display: none; }
+    }
+    .nav-cta {
+      background: var(--primary);
+      color: white !important;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 600 !important;
+    }
+
+    /* ---------- HERO ---------- */
+    .hero {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 64px 24px 48px;
+      text-align: center;
+    }
+    .pioneer-badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: var(--gold-light);
+      color: var(--gold);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .pioneer-badge-pill .star { font-size: 14px; }
+    h1 {
+      font-size: 52px;
+      font-weight: 800;
+      margin: 0 0 18px;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+    }
+    h1 .highlight {
+      background: linear-gradient(120deg, var(--gold) 0%, #B47A1A 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    @media (max-width: 600px) {
+      h1 { font-size: 36px; }
+    }
+    .lead {
+      font-size: 19px;
+      color: var(--muted);
+      max-width: 620px;
+      margin: 0 auto 28px;
+    }
+    .lead strong { color: var(--text); }
+
+    /* ---------- LAUNCH STRIP ---------- */
+    .launch-strip {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: center;
+      padding: 18px 28px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      margin-bottom: 32px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    }
+    .launch-strip .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 16px;
+    }
+    .launch-strip .pill {
+      background: var(--primary-light);
+      color: var(--primary-dark);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+    .launch-strip .label {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .launch-strip .row strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    /* ---------- COUNTER ---------- */
+    .counter-card {
+      max-width: 520px;
+      margin: 0 auto 36px;
+      padding: 24px 28px;
+      background: linear-gradient(135deg, #FFF6E0 0%, #FFF0CC 100%);
+      border: 1px solid #F0DFA0;
+      border-radius: 18px;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    @media (max-width: 600px) {
+      .counter-card { flex-direction: column; text-align: center; }
+    }
+    .counter-card .num {
+      font-size: 56px;
+      font-weight: 800;
+      color: var(--gold);
+      letter-spacing: -0.04em;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .counter-card .body {
+      flex: 1;
+    }
+    .counter-card .body strong {
+      display: block;
+      font-size: 16px;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .counter-card .body span {
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    /* ---------- BUTTONS ---------- */
+    .cta-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 16px;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: transform 0.15s, box-shadow 0.15s;
+      cursor: pointer;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 8px 20px rgba(0, 168, 126, 0.25);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 12px 28px rgba(0, 168, 126, 0.32);
+    }
+    .btn-secondary {
+      background: white;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--primary); }
+    .btn-disabled {
+      background: white;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .cta-helper {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* ---------- SECTIONS ---------- */
+    section {
+      padding: 72px 24px;
+    }
+    .section-inner {
+      max-width: 880px;
+      margin: 0 auto;
+    }
+    .section-narrow {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    h2 {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin: 0 0 16px;
+      line-height: 1.2;
+    }
+    h2 + .section-lead {
+      font-size: 18px;
+      color: var(--muted);
+      margin: 0 0 36px;
+    }
+    h3 {
+      font-size: 19px;
+      font-weight: 700;
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+    }
+    .alt-bg { background: var(--bg-soft); }
+
+    /* ---------- PERKS ---------- */
+    .perks {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    @media (max-width: 760px) {
+      .perks { grid-template-columns: 1fr; }
+    }
+    .perk {
+      padding: 28px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      position: relative;
+    }
+    .perk-num {
+      position: absolute;
+      top: -16px;
+      left: 24px;
+      width: 32px;
+      height: 32px;
+      background: var(--gold);
+      color: white;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .perk .icon {
+      width: 48px;
+      height: 48px;
+      background: var(--gold-light);
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 14px;
+    }
+    .perk p {
+      color: var(--muted);
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    /* ---------- WHY-NOW STRIP ---------- */
+    .why-now {
+      background: var(--text);
+      color: white;
+      padding: 48px 24px;
+      text-align: center;
+    }
+    .why-now h2 {
+      color: white;
+      font-size: 28px;
+      max-width: 720px;
+      margin: 0 auto 12px;
+      line-height: 1.3;
+    }
+    .why-now p {
+      color: rgba(255, 255, 255, 0.75);
+      max-width: 580px;
+      margin: 0 auto;
+      font-size: 16px;
+    }
+
+    /* ---------- HOW JOIN ---------- */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-top: 8px;
+    }
+    @media (max-width: 760px) {
+      .steps { grid-template-columns: 1fr; }
+    }
+    .step-card {
+      padding: 24px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+    .step-card .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      background: var(--primary);
+      color: white;
+      border-radius: 50%;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .step-card strong {
+      display: block;
+      font-size: 17px;
+      margin-bottom: 6px;
+    }
+    .step-card p {
+      color: var(--muted);
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    /* ---------- FAQ ---------- */
+    details {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 22px;
+      margin-bottom: 12px;
+    }
+    details[open] { border-color: var(--gold); }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 16px;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after {
+      content: "+";
+      font-size: 22px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    details[open] summary::after {
+      content: "−";
+      color: var(--gold);
+    }
+    details p {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    details ul {
+      margin: 10px 0 0;
+      padding-left: 22px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    /* ---------- FINAL CTA ---------- */
+    .final-cta {
+      background: linear-gradient(135deg, var(--gold) 0%, #A37618 100%);
+      color: white;
+      text-align: center;
+      padding: 72px 24px;
+    }
+    .final-cta h2 {
+      color: white;
+      margin-bottom: 12px;
+    }
+    .final-cta p {
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 17px;
+      max-width: 540px;
+      margin: 0 auto 28px;
+    }
+    .final-cta .btn-primary {
+      background: white;
+      color: var(--gold);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+    }
+    .final-cta .btn-secondary {
+      background: transparent;
+      color: white;
+      border-color: rgba(255, 255, 255, 0.4);
+    }
+    .final-cta .btn-disabled {
+      background: rgba(255, 255, 255, 0.15);
+      color: rgba(255, 255, 255, 0.85);
+      border: 1px dashed rgba(255, 255, 255, 0.5);
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .final-cta .cta-helper {
+      color: rgba(255, 255, 255, 0.85);
+      margin-top: 14px;
+      font-size: 14px;
+    }
+    .final-cta .cta-helper a { color: white; }
+
+    /* ---------- FOOTER ---------- */
+    footer.site {
+      background: #0F1411;
+      color: #A8B0AC;
+      padding: 48px 24px 32px;
+      text-align: center;
+      font-size: 14px;
+    }
+    footer.site a {
+      color: #A8B0AC;
+      text-decoration: none;
+      margin: 0 12px;
+    }
+    footer.site a:hover { color: white; }
+    footer.site .footer-logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: white;
+      font-weight: 700;
+      margin-bottom: 16px;
+      font-size: 18px;
+    }
+    footer.site .footer-logo .mark {
+      width: 28px;
+      height: 28px;
+      background: var(--primary);
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    footer.site .links {
+      margin: 16px 0;
+    }
+    footer.site .copyright {
+      margin-top: 16px;
+      color: #5C6B63;
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-logo">
+        <span class="mark">⚡</span>
+        <span class="name">Pluggo</span>
+      </a>
+      <div class="nav-links">
+        <a href="/#hoe-werkt-het">Hoe werkt het</a>
+        <a href="/#impact">Impact</a>
+        <a href="/#faq">FAQ</a>
+        <a href="#hoe-doe-je-mee" class="nav-cta">Word Pionier</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="pioneer-badge-pill">
+      <span class="star">★</span>
+      Pluggo Pioniers — eerste 100 paaleigenaren
+    </div>
+    <h1>Word een van de <span class="highlight">eerste 100 paaleigenaren</span> van Nederland.</h1>
+    <p class="lead">
+      Pluggo is het Nederlandse platform waarop EV-rijders met een eigen laadpaal die paal kunnen delen met EV-rijders uit de buurt. <strong>Word Pluggo Pionier</strong> en houd die status permanent — ook nadat alle 100 plekken vergeven zijn.
+    </p>
+
+    <div class="launch-strip">
+      <div class="row">
+        <span class="pill">1 juni 2026</span>
+        <span><strong>App live</strong> in Apple App Store &amp; Google Play Store</span>
+      </div>
+      <div class="row">
+        <span class="pill">1 juli 2026</span>
+        <span><strong>Boekingen open</strong> — EV-rijders kunnen door heel Nederland boeken</span>
+      </div>
+    </div>
+
+    <div class="counter-card">
+      <div class="num" id="pioneer-count">0</div>
+      <div class="body">
+        <strong>van 100 Pluggo Pioniers vergeven</strong>
+        <span>Telling start op 1 juni 2026 zodra de eerste paaleigenaren hun paal in de app toevoegen.</span>
+      </div>
+    </div>
+
+    <div class="cta-row">
+      <a href="#" class="btn btn-disabled" aria-disabled="true">Download in App Store — vanaf 1 juni</a>
+      <a href="#" class="btn btn-disabled" aria-disabled="true">Download in Play Store — vanaf 1 juni</a>
+    </div>
+    <p class="cta-helper">
+      Tot 1 juni 2026 staat de app nog niet in de stores. Mail <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a> en we sturen je op 1 juni een seintje zodra de app live staat.
+    </p>
+  </header>
+
+  <section class="alt-bg" id="perks">
+    <div class="section-inner">
+      <div class="eyebrow">Wat krijg je?</div>
+      <h2>Drie permanente voordelen — geen abonnement, geen voorwaarden.</h2>
+      <p class="section-lead">
+        Als je in de eerste 6 weken na 1 juni 2026 je paal toevoegt en hem actief beschikbaar stelt, ben je Pionier — voor altijd. Geen periodieke verlenging nodig.
+      </p>
+
+      <div class="perks">
+        <div class="perk">
+          <div class="perk-num">1</div>
+          <div class="icon">★</div>
+          <h3>Permanente Pionier-badge</h3>
+          <p>Een gouden Pluggo Pionier-badge naast je profielnaam en op je paal-detailpagina in de app. Boekers zien direct dat jij vanaf het allereerste moment meedoet — een sterk signaal van betrouwbaarheid.</p>
+        </div>
+        <div class="perk">
+          <div class="perk-num">2</div>
+          <div class="icon">📍</div>
+          <h3>Voorrang in jouw straat</h3>
+          <p>Komt er later een tweede paal in dezelfde postcode-6? Dan blijft jouw paal de eerste 30 dagen prominenter zichtbaar op de kaart — boekers vinden jouw paal als eerste.</p>
+        </div>
+        <div class="perk">
+          <div class="perk-num">3</div>
+          <div class="icon">🏛️</div>
+          <h3>Vermelding op deze pagina</h3>
+          <p>Je voornaam, stad en (optioneel) een korte quote komen — als je dat wilt — op deze pioniers-pagina te staan. Een publieke wall-of-fame voor wie eerst durfde.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="why-now">
+    <h2>Waarom nu — en niet later?</h2>
+    <p>
+      Hoe meer palen er op 1 juli (boekingsopening) op de kaart staan, hoe sterker Pluggo landelijk start. De eerste 100 paaleigenaren leveren niet alleen hun paal — ze maken het hele platform werkbaar voor de duizenden EV-rijders die volgen.
+    </p>
+  </section>
+
+  <section id="hoe-doe-je-mee">
+    <div class="section-inner">
+      <div class="eyebrow">Hoe doe je mee</div>
+      <h2>In drie stappen — vanaf 1 juni 2026.</h2>
+      <p class="section-lead">
+        De Pluggo-app is <strong>vanaf 1 juni 2026</strong> te downloaden in de Apple App Store en Google Play Store. Tot die datum kun je je alvast aanmelden via e-mail — dan sturen wij je een seintje zodra de app live staat.
+      </p>
+
+      <div class="steps">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <strong>Download de app op 1 juni</strong>
+          <p>Zoek "Pluggo" in de App Store of Google Play en maak een account aan. Aanmelden is geheel gratis — geen abonnement, geen opstartkosten.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <strong>Voeg je paal toe</strong>
+          <p>Adres, foto, prijs per kWh en beschikbaarheid — klaar in een paar minuten. Stel zelf in wanneer je paal te boeken is.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <strong>Ontvang Pionier-status</strong>
+          <p>Zodra je paal actief is, krijg je automatisch de Pionier-badge in je profiel. Vanaf 1 juli openen de boekingen en kunnen EV-rijders bij jou terecht.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt-bg" id="faq">
+    <div class="section-inner section-narrow">
+      <div class="eyebrow">FAQ</div>
+      <h2>Veelgestelde vragen over de Pioniers-status</h2>
+
+      <details>
+        <summary>Wanneer kan ik de app downloaden?</summary>
+        <p>De Pluggo-app staat <strong>vanaf 1 juni 2026</strong> in de Apple App Store en Google Play Store. Vóór die datum staat de app nog niet in de stores — je kunt je wel alvast melden via e-mail (<a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a>), dan sturen we je op 1 juni een korte mail zodra de app live staat.</p>
+      </details>
+
+      <details>
+        <summary>Wanneer beginnen de boekingen?</summary>
+        <p>Boekingen openen landelijk op <strong>1 juli 2026</strong>. In de tussenliggende maand (1 juni – 30 juni) bouwen we samen met paaleigenaren de kaart op. Hoe meer palen op 1 juli zichtbaar zijn, hoe sterker we van start gaan.</p>
+      </details>
+
+      <details>
+        <summary>Hoe weet ik of ik nog Pionier kan worden?</summary>
+        <p>De teller bovenaan deze pagina laat in real-time zien hoeveel van de 100 Pioniers-plekken nog beschikbaar zijn. De telling start op 1 juni zodra de eerste paaleigenaren hun paal toevoegen. Eerste-komt-eerste-maalt — wel moet je paal binnen 6 weken na aanmelding ook daadwerkelijk beschikbaar zijn voor boekingen.</p>
+      </details>
+
+      <details>
+        <summary>Zit er een verplichting aan vast?</summary>
+        <p>Nee. Aanmelden is vrijblijvend en geheel gratis — geen abonnement, geen opstartkosten. Je bepaalt zelf de prijs per kWh en wanneer je paal beschikbaar is. Pluggo verdient pas iets bij een daadwerkelijke boeking, via een transparante servicefee van €0,03 per kWh aan beide kanten.</p>
+      </details>
+
+      <details>
+        <summary>Behoud ik de Pionier-status als ik tijdelijk stop?</summary>
+        <p>Ja — eenmaal Pionier, altijd Pionier. Als je je paal tijdelijk op pauze zet (bijv. tijdens vakantie of een verhuizing), behoud je de badge en blijf je in de wall-of-fame staan. Verwijder je je paal volledig en blijft hij langer dan 6 maanden weg, dan wordt je status opnieuw bekeken.</p>
+      </details>
+
+      <details>
+        <summary>Wat verdien ik als Pionier?</summary>
+        <p>Hetzelfde als andere paaleigenaren — jij bepaalt zelf de prijs per kWh. Bij een paar laadsessies per week is €100 tot €200 per maand realistisch. Met zonnepanelen kan dit oplopen tot €900–€2.900 per jaar. Pluggo houdt €0,03/kWh in als servicefee aan beide kanten (boeker en eigenaar). Voorbeeld: stel je je paal in op €0,30/kWh, dan betaalt de boeker €0,33/kWh en ontvang jij €0,27/kWh op je IBAN.</p>
+      </details>
+
+      <details>
+        <summary>Wil ik echt op de pioniers-pagina vermeld worden?</summary>
+        <p>Volledig je eigen keuze. Bij aanmelding kun je aangeven of je voornaam + stad publiek vermeld mag worden. Je hoeft dat niet aan te zetten om de andere twee Pionier-voordelen (badge en voorrang in je straat) te krijgen. Vermelding kan op elk moment in je profiel aan- of uitgezet worden.</p>
+      </details>
+
+      <details>
+        <summary>Mag ik meedoen als ik huur of in een VvE woon?</summary>
+        <p>Ja, mits je toestemming hebt. Huur je? Vraag even na bij je verhuurder of het oké is dat je je laadpaal via Pluggo aanbiedt. Woon je in een VvE? Dan moet je doorgaans toestemming van het bestuur of de ledenvergadering hebben. Een korte mail naar je verhuurder of VvE-bestuur is meestal genoeg om het netjes vast te leggen.</p>
+      </details>
+
+      <details>
+        <summary>Wat als ik nog vragen heb?</summary>
+        <p>Stuur een mail naar <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a> — we reageren meestal binnen een dag. Of lees de uitgebreide FAQ op de <a href="/">Pluggo-homepage</a> voor algemene vragen over de app, betaling, fiscale aspecten, en hoe het stroomnet erbij gebaat is.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="final-cta">
+    <h2>Klaar om Pionier te worden?</h2>
+    <p>
+      De app staat <strong>vanaf 1 juni 2026</strong> in de Apple App Store en Google Play Store. Op <strong>1 juli</strong> openen de boekingen landelijk. Mail nu en je hoort als eerste zodra de app live staat.
+    </p>
+    <div class="cta-row">
+      <a href="mailto:info@pluggoapp.nl?subject=Pluggo%20Pionier%20-%20stuur%20me%20een%20seintje%20op%201%20juni&amp;body=Hoi%20Pluggo%2C%0A%0AIk%20heb%20een%20eigen%20laadpaal%20en%20wil%20Pluggo%20Pionier%20worden.%20Stuur%20me%20op%201%20juni%202026%20een%20seintje%20zodra%20de%20app%20live%20staat%20in%20de%20stores.%0A%0ANaam%3A%0AStad%20%2F%20postcode%3A%0AMerk%20laadpaal%3A%0AZonnepanelen%3A%20ja%2Fnee%0A%0AGroet%2C" class="btn btn-primary">Mail mij op 1 juni</a>
+      <a href="#" class="btn btn-disabled" aria-disabled="true">Download in App Store — vanaf 1 juni</a>
+    </div>
+    <p class="cta-helper">
+      Of stuur direct een mail naar <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a> met je vragen.
+    </p>
+  </section>
+
+  <footer class="site">
+    <div class="footer-logo">
+      <span class="mark">⚡</span>
+      <span>Pluggo</span>
+    </div>
+    <div class="links">
+      <a href="/">Homepage</a>
+      <a href="/privacy.html">Privacybeleid</a>
+      <a href="/terms.html">Algemene voorwaarden</a>
+      <a href="mailto:info@pluggoapp.nl">Contact</a>
+    </div>
+    <div class="copyright">
+      © 2026 Pluggo · Een handelsnaam van Raka Cazander · Gemaakt in Nederland.
+    </div>
+  </footer>
+
+  <script>
+    // Pioneer counter — placeholder until backend is connected.
+    // After 1 June 2026 this will read live from Supabase via a small JSON endpoint.
+    (function () {
+      var el = document.getElementById('pioneer-count');
+      if (!el) return;
+      // Static placeholder for now (telling start op 1 juni)
+      el.textContent = '0';
+    })();
+  </script>
+</body>
+</html>

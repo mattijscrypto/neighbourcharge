@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pluggo — Deel je laadpaal met de buurt</title>
-  <meta name="description" content="Pluggo is het peer-to-peer laadnetwerk voor Nederland. Eigenaars verdienen aan hun privélaadpaal, laders vinden goedkoper laden in de buurt. Live op 1 juli 2026." />
+  <meta name="description" content="Pluggo is het peer-to-peer laadnetwerk voor Nederland. Eigenaars verdienen aan hun privélaadpaal, laders vinden goedkoper laden in de buurt. App vanaf 1 juni 2026 in App Store en Google Play, boekingen open vanaf 1 juli 2026." />
   <meta property="og:title" content="Pluggo — Deel je laadpaal met de buurt" />
-  <meta property="og:description" content="Het peer-to-peer laadnetwerk voor Nederland. Live op 1 juli 2026." />
+  <meta property="og:description" content="Het peer-to-peer laadnetwerk voor Nederland. App in stores vanaf 1 juni 2026, boekingen open vanaf 1 juli 2026." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://pluggoapp.nl" />
   <meta property="og:site_name" content="Pluggo" />
@@ -245,6 +245,25 @@
     .btn-secondary:hover { border-color: var(--primary); }
 
     /* ---------- COUNTDOWN ---------- */
+    .countdown-wrap {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .countdown-eyebrow {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--primary-dark);
+    }
+    .countdown-foot {
+      font-size: 13px;
+      color: var(--muted);
+      max-width: 360px;
+      text-align: center;
+    }
     .countdown {
       display: inline-flex;
       gap: 10px;
@@ -657,7 +676,7 @@
   <header class="hero">
     <div class="badge">
       <span class="dot"></span>
-      App live op 1 juli 2026
+      Vanaf 1 juni in App Store &amp; Play Store · Boekingen open op 1 juli
     </div>
     <h1>Het laadnet van<br/><span class="highlight">de buurt zelf.</span></h1>
     <p class="lead">
@@ -665,27 +684,34 @@
     </p>
 
     <div class="cta-row">
-      <a href="#meedoen" class="btn btn-primary">Voeg je paal alvast toe</a>
+      <a href="/pioniers" class="btn btn-primary">Word Pluggo Pionier — eerste 100</a>
       <a href="#hoe-werkt-het" class="btn btn-secondary">Hoe werkt het?</a>
     </div>
+    <p style="margin: -28px auto 32px; font-size: 13px; color: var(--muted); max-width: 460px;">
+      De app is nog niet beschikbaar in de stores. Vanaf <strong>1 juni 2026</strong> downloadbaar in App Store &amp; Google Play.
+    </p>
 
-    <div class="countdown" id="countdown">
-      <div class="countdown-item">
-        <span class="countdown-num" id="cd-days">—</span>
-        <span class="countdown-label">Dagen</span>
+    <div class="countdown-wrap">
+      <div class="countdown-eyebrow">Tot de app live gaat in App Store &amp; Play Store</div>
+      <div class="countdown" id="countdown">
+        <div class="countdown-item">
+          <span class="countdown-num" id="cd-days">—</span>
+          <span class="countdown-label">Dagen</span>
+        </div>
+        <div class="countdown-item">
+          <span class="countdown-num" id="cd-hours">—</span>
+          <span class="countdown-label">Uur</span>
+        </div>
+        <div class="countdown-item">
+          <span class="countdown-num" id="cd-mins">—</span>
+          <span class="countdown-label">Min</span>
+        </div>
+        <div class="countdown-item">
+          <span class="countdown-num" id="cd-secs">—</span>
+          <span class="countdown-label">Sec</span>
+        </div>
       </div>
-      <div class="countdown-item">
-        <span class="countdown-num" id="cd-hours">—</span>
-        <span class="countdown-label">Uur</span>
-      </div>
-      <div class="countdown-item">
-        <span class="countdown-num" id="cd-mins">—</span>
-        <span class="countdown-label">Min</span>
-      </div>
-      <div class="countdown-item">
-        <span class="countdown-num" id="cd-secs">—</span>
-        <span class="countdown-label">Sec</span>
-      </div>
+      <div class="countdown-foot">Boekingen openen op 1 juli 2026 — vanaf 1 juni kun je alvast je paal toevoegen.</div>
     </div>
   </header>
 
@@ -919,7 +945,7 @@
 
       <details>
         <summary>Wanneer gaat de app live?</summary>
-        <p>Op 1 juli 2026 gaan boekingen open. Tot die tijd kun je de app al downloaden, een account aanmaken en je laadpaal toevoegen, zodat je vanaf dag één klaar bent om boekingen te ontvangen.</p>
+        <p>Twee data om te onthouden. Vanaf <strong>1 juni 2026</strong> staat de Pluggo-app in de Apple App Store en Google Play Store — vanaf dat moment kun je hem downloaden, een account aanmaken en je laadpaal toevoegen. Op <strong>1 juli 2026</strong> openen de boekingen landelijk: vanaf dan kunnen EV-rijders bij jouw paal terecht. In de tussenliggende maand bouwen we samen de kaart op.</p>
       </details>
 
       <details>
@@ -1015,13 +1041,15 @@
   <section class="final-cta" id="meedoen">
     <h2>Doe vanaf het begin mee.</h2>
     <p>
-      Voeg nu alvast je paal toe of maak een account aan. Hoe meer palen er op 1 juli staan, hoe sterker we starten.
+      De Pluggo-app staat <strong>vanaf 1 juni 2026</strong> in de Apple App Store en Google Play Store. Op <strong>1 juli</strong> openen de boekingen landelijk. Hoe meer palen er op 1 juli staan, hoe sterker we starten.
     </p>
     <div class="cta-row">
-      <a href="#" class="btn btn-primary">Download in App Store</a>
-      <a href="#" class="btn btn-secondary">Download in Play Store</a>
+      <a href="/pioniers" class="btn btn-primary">Word Pionier — eerste 100 paaleigenaren</a>
+      <a href="#" class="btn btn-secondary" aria-disabled="true" style="opacity: 0.65; cursor: not-allowed;">Download in App Store — vanaf 1 juni</a>
     </div>
-    <p style="margin-top: 24px; font-size: 14px; opacity: 0.7;">App stores volgen binnenkort. Tot die tijd: mail <a href="mailto:info@pluggoapp.nl" style="color: white;">info@pluggoapp.nl</a> en we houden je op de hoogte.</p>
+    <p style="margin-top: 24px; font-size: 14px; opacity: 0.85;">
+      <strong style="color: white;">De app is nog niet beschikbaar in de stores.</strong> Tot 1 juni 2026: mail <a href="mailto:info@pluggoapp.nl" style="color: white;">info@pluggoapp.nl</a> en we sturen je op 1 juni een seintje zodra de app live staat.
+    </p>
   </section>
 
   <footer class="site">
@@ -1040,9 +1068,9 @@
   </footer>
 
   <script>
-    // Launch countdown — 1 juli 2026 om 00:00 NL-tijd
+    // App store launch countdown — 1 juni 2026 om 00:00 NL-tijd
     (function () {
-      const launch = new Date('2026-07-01T00:00:00+02:00').getTime();
+      const launch = new Date('2026-06-01T00:00:00+02:00').getTime();
       const els = {
         days: document.getElementById('cd-days'),
         hours: document.getElementById('cd-hours'),
