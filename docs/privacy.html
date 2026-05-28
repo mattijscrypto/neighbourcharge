@@ -117,7 +117,7 @@
     </a>
 
     <h1>Privacybeleid</h1>
-    <p class="updated">Laatst bijgewerkt: 27 april 2026</p>
+    <p class="updated">Laatst bijgewerkt: 28 mei 2026</p>
 
     <div class="intro">
       <p>Pluggo is een platform waarop buurtbewoners hun private laadpaal delen met andere EV-rijders. Om dit mogelijk te maken verwerken we een beperkte hoeveelheid persoonsgegevens. Deze pagina legt uit welke gegevens we verzamelen, waarom, en welke rechten je hebt.</p>
@@ -133,6 +133,8 @@
       <li><strong>Accountgegevens:</strong> e-mailadres, wachtwoord (versleuteld opgeslagen) en naam.</li>
       <li><strong>Laadpaal-gegevens (bij aanbieders):</strong> adres, titel, beschrijving, prijs per kWh, instructies en foto's van de paal en oprit.</li>
       <li><strong>Boekingsgegevens:</strong> datum, tijdvak, en een optionele berichttekst bij een boeking.</li>
+      <li><strong>Fiscale en zakelijke gegevens (bij aanbieders):</strong> BTW-status (zakelijk óf particulier met KOR-registratie), en bij zakelijke aanbieders aanvullend KvK-nummer en BTW-identificatienummer. Pluggo gebruikt deze gegevens uitsluitend om correcte facturen op te stellen namens jou (zie §4 van de algemene voorwaarden, self-billing) en geeft ze door aan Stripe voor de wettelijke KYC-procedure.</li>
+      <li><strong>Identificatiegegevens voor Stripe (bij aanbieders):</strong> naam, geboortedatum, adres en IBAN. Deze gegevens worden via de app rechtstreeks doorgegeven aan Stripe voor het openen en onderhouden van een Stripe Connect Express account; Pluggo bewaart een minimum aan referentiedata (zoals het Stripe-account-ID en de status van de KYC-controle) in de eigen database.</li>
     </ul>
 
     <h3>Gegevens die automatisch worden verzameld</h3>
@@ -162,9 +164,10 @@
     <p>We verkopen geen gegevens. We schakelen de volgende verwerkers in om Pluggo te laten werken:</p>
     <ul>
       <li><strong>Supabase</strong> — database, authenticatie en bestandsopslag. Data wordt opgeslagen in datacenters binnen de EU.</li>
-      <li><strong>Resend</strong> — verzending van transactionele e-mails (bijv. boekingsnotificaties).</li>
+      <li><strong>Stripe</strong> — betalingsverwerking, KYC en uitbetalingen. Aanbieders verstrekken (via de Pluggo-app) hun naam, geboortedatum, adres, IBAN en — bij zakelijke aanbieders — KvK- en BTW-nummer rechtstreeks aan Stripe. Boekers verstrekken hun betaalgegevens (kaartnummer, bankrekening) uitsluitend aan Stripe; Pluggo ziet of bewaart deze betaalgegevens niet. Stripe treedt voor de betaaltransactie zelf op als verwerkingsverantwoordelijke onder zijn eigen PSD2-vergunning. Zie het <a href="https://stripe.com/nl/privacy" target="_blank" rel="noopener">privacybeleid van Stripe</a> voor details.</li>
+      <li><strong>Resend</strong> — verzending van transactionele e-mails (bijv. boekingsnotificaties en factuur-bijlages).</li>
       <li><strong>Google Maps</strong> — voor het tonen van de kaart. Google verwerkt hierbij technische gegevens zoals je IP-adres.</li>
-      <li><strong>Apple / Google</strong> — de respectievelijke app stores waar de app wordt gedistribueerd.</li>
+      <li><strong>Apple / Google</strong> — de respectievelijke app stores waar de app wordt gedistribueerd en (voor pushmeldingen) verzonden worden via APNs/FCM.</li>
     </ul>
     <p>Andere Pluggo-gebruikers zien van jou alleen wat nodig is om een boeking uit te voeren: bij aanbieders de paalgegevens en adres, en bij boekers je naam en berichttekst — uitsluitend zichtbaar voor de eigenaar van de geboekte paal.</p>
 
