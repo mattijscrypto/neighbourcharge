@@ -21,7 +21,7 @@ alter table public.profiles
   add column if not exists iban text;
 
 comment on column public.profiles.iban is
-  'IBAN waarop de eigenaar zijn 95%-aandeel uitbetaald krijgt. Verplicht voor wie een paal aanbiedt.';
+  'IBAN waarop de eigenaar zijn aandeel uitbetaald krijgt (paalprijs minus €0,03/kWh servicefee). Verplicht voor wie een paal aanbiedt.';
 
 -- ---------------------------------------------------------------------------
 -- 2. Enum voor betaalstatus
@@ -45,9 +45,9 @@ end $$;
 -- ---------------------------------------------------------------------------
 alter table public.bookings
   add column if not exists payment_status public.payment_status not null default 'unpaid',
-  add column if not exists total_amount_cents integer,    -- Wat de boeker betaalt (incl. 5% fee)
-  add column if not exists service_fee_cents integer,     -- Pluggo's deel (5%)
-  add column if not exists owner_share_cents integer;     -- Eigenaar's deel (95%)
+  add column if not exists total_amount_cents integer,    -- Wat de boeker betaalt (kWh × (paalprijs + €0,03))
+  add column if not exists service_fee_cents integer,     -- Pluggo's deel (kWh × €0,06)
+  add column if not exists owner_share_cents integer;     -- Eigenaar's deel (kWh × (paalprijs − €0,03))
 
 create index if not exists bookings_payment_status_idx
   on public.bookings(payment_status);
