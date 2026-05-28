@@ -121,16 +121,113 @@ serve(async (req) => {
     }
 
     // -----------------------------------------------------------------------
-    // 5. Update boeking met nieuwe payment_status
+    // 5. Update boeking — leid status af uit ÁLLE payments voor deze boeking,
+    //    niet alleen deze webhook. Voorkomt dat een late "failed" webhook van
+    //    een eerdere afgebroken poging een succesvolle "paid" overschrijft
+    //    (bug #71: last-write-wins race condition).
+    //
+    //    Regel:
+    //      - Eén of meer payments paid     → booking paid
+    //      - Geen paid maar wel pending    → booking pending
+    //      - Alleen failed/canceled        → booking failed
+    //      - Geen payments                 → unpaid (zou hier niet voorkomen)
     // -----------------------------------------------------------------------
-    const { error: bUpdErr } = await admin
-      .from("bookings")
-      .update({ payment_status: newStatus })
-      .eq("id", paymentRow.booking_id);
+    // Was de booking vóór deze update al paid? Zo ja, dan is dit een dubbele
+    // webhook en moeten we GEEN push sturen (anders krijgt de owner 2x ping).
+    const wasAlreadyPaidOnBooking = await (async () => {
+      const { data: bRow } = await admin
+        .from("bookings")
+        .select("payment_status")
+        .eq("id", paymentRow.booking_id)
+        .maybeSingle();
+      return bRow?.payment_status === "paid";
+    })();
 
-    if (bUpdErr) {
-      console.error("Kon booking niet updaten:", bUpdErr);
-      // Niet retryen — payment is correct gelogd, dit is consistency-issue
+    const { data: allPayments, error: listErr } = await admin
+      .from("payments")
+      .select("status")
+      .eq("booking_id", paymentRow.booking_id);
+
+    if (listErr) {
+      console.error("Kon payments niet ophalen voor status-derivatie:", listErr);
+      // Fallback: oude logic — beter iets dan niets
+      await admin
+        .from("bookings")
+        .update({ payment_status: newStatus })
+        .eq("id", paymentRow.booking_id);
+    } else {
+      let derivedStatus: string;
+      if (allPayments?.some((p: any) => p.status === "paid")) {
+        derivedStatus = "paid";
+      } else if (allPayments?.some((p: any) => p.status === "pending")) {
+        derivedStatus = "pending";
+      } else if (allPayments && allPayments.length > 0) {
+        derivedStatus = "failed";
+      } else {
+        derivedStatus = "unpaid";
+      }
+
+      const { error: bUpdErr } = await admin
+        .from("bookings")
+        .update({ payment_status: derivedStatus })
+        .eq("id", paymentRow.booking_id);
+
+      if (bUpdErr) {
+        console.error("Kon booking niet updaten:", bUpdErr);
+        // Niet retryen — payment is correct gelogd, dit is consistency-issue
+      }
+
+      // ---------------------------------------------------------------------
+      // 6. Push naar eigenaar bij eerste-keer-paid. Best effort:
+      //    - alleen als de booking NU op "paid" staat
+      //    - alleen als de booking dit nog niet was (idempotent)
+      //    - faalt stil; payment-status moet altijd correct gelogd zijn
+      // ---------------------------------------------------------------------
+      if (derivedStatus === "paid" && !wasAlreadyPaidOnBooking) {
+        try {
+          const { data: bookingRow } = await admin
+            .from("bookings")
+            .select(
+              "id, user_name, total_amount_cents, charger_id, " +
+                "chargers(owner_id, name)"
+            )
+            .eq("id", paymentRow.booking_id)
+            .maybeSingle();
+
+          // chargers join komt als object terug (single FK), niet als array
+          const charger = (bookingRow as any)?.chargers;
+          const ownerId = charger?.owner_id as string | undefined;
+          const chargerName = (charger?.name as string | undefined) ?? "je laadpaal";
+          const bookerName =
+            (bookingRow?.user_name as string | undefined) ?? "De boeker";
+          const totalCents =
+            (bookingRow?.total_amount_cents as number | undefined) ?? 0;
+          const euro = (totalCents / 100).toFixed(2).replace(".", ",");
+
+          if (ownerId) {
+            // Roep onze eigen send-push function aan met service-role auth.
+            await fetch(`${supabaseUrl}/functions/v1/send-push`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${supabaseServiceKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                user_id: ownerId,
+                title: "Betaling ontvangen",
+                body: `${bookerName} heeft € ${euro} betaald voor ${chargerName}.`,
+                data: {
+                  type: "payment_paid",
+                  booking_id: String(paymentRow.booking_id),
+                },
+              }),
+            });
+          }
+        } catch (pushErr) {
+          // Niet fataal — webhook moet altijd 200 teruggeven
+          console.error("send-push naar owner faalde:", pushErr);
+        }
+      }
     }
 
     return new Response("ok", { status: 200 });
