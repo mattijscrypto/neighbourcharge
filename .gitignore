@@ -80,3 +80,18 @@ app.*.map.json
 
 # Exceptions to above rules.
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
+
+# Secrets — NEVER commit
+secrets/
+*.env
+.env.local
+.env.production
+
+# Supabase CLI local state
+/supabase/.temp/
+
+# Internal/operational notes (kept locally, not for public repo)
+/_internal/
+
+# Grote binaries — gebruik cloud-storage in plaats van git
+*.pptx
