@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -13,11 +15,26 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'push.dart';
+import 'stripe_service.dart';
+
 // Supabase configuratie
 // Voor een echt product horen deze in environment variables,
 // maar voor een MVP is dit prima. De publishable key is veilig om te delen.
 const String supabaseUrl = 'https://vfqpijlicngnomrsasvf.supabase.co';
 const String supabaseAnonKey = 'sb_publishable_6LYdmmkM6efPz5WJzi5tiQ_0qiXqML1';
+
+// Stripe publishable key — veilig om client-side te exposen (Stripe SDK
+// gebruikt 'm alleen om payment-methods te tokeniseren, niet om charges
+// te maken). De geheime sk_test_… key staat alleen server-side in de
+// Supabase Edge Functions secrets.
+//
+// TEST mode (huidig): pk_test_…
+// LIVE mode (cutover 7 juli 2026): vervang door pk_live_… én rebuild de
+// app voor productie release. Geen runtime toggle — Stripe.publishableKey
+// staat vast voor de hele app lifecycle na main().
+const String stripePublishableKey =
+    'pk_test_51TZtsPHUR6BWGt6YgaTrqtgmEs3SNehFj6uTR4ceP9hNIi8ekXpZFWM925cmsWuTucIVwb9M9z5rkAXPN9lFnEgo00L7mmpk4v';
 
 // Google Maps API key - dezelfde als in AppDelegate.swift en web/index.html
 const String googleMapsApiKey = 'AIzaSyCLt4pD18cnyedvZnLD6f7XEfRkIy4Dtio';
@@ -33,35 +50,79 @@ const String termsOfServiceUrl = 'https://pluggoapp.nl/terms.html';
 // melding op de launch dag (zie Supabase scheduled function).
 // Pas deze datum aan als de launch verschuift.
 // ============================================
-final DateTime bookingsGoLiveAt = DateTime(2026, 7, 1);
+final DateTime bookingsGoLiveAt = DateTime(2026, 7, 7);
 
-// Apple-reviewer bypass — tijdens App Review moet de Apple-tester het
-// volledige boekingsflow kunnen doorlopen, ook al zitten we nog vóór de
-// publieke launchdatum. Wanneer een tester inlogt met een van onderstaande
-// e-mailaccounts (vooraf aangemaakt in Supabase Auth), wordt de date-gate
-// genegeerd en gedraagt de app zich alsof boekingen al live zijn.
-// Eerste entry is voor Apple zelf; de overige zijn voor onze interne
-// pre-launch tests (Mollie checkout, IBAN-prompt, etc.) zodat we het
-// Apple-account schoon kunnen houden — zonder IBAN, zonder palen — zodat
-// de reviewer zelf de IBAN-prompt en paal-upload-flow kan ervaren.
-// Na launch op [bookingsGoLiveAt] heeft deze lijst geen effect meer.
+// Bypass van de date-gate kent twee bronnen:
+//
+//  1. [bypassEmails] — hardcoded "core"-lijst. Reviewers en founders. Deze
+//     vier veranderen nooit, dus we houden ze in code zodat ze óók werken
+//     als de DB onbereikbaar is (eerste launch, offline modus, kapotte RLS).
+//
+//  2. [_dbBypassEmailMatched] — runtime gecachte boolean die zegt of de
+//     huidige user op de DB-tabel `public.bypass_emails` staat. Wordt
+//     gerefresht bij app-start en bij iedere auth state change. Hierdoor
+//     kunnen we testers toevoegen via Supabase Studio zonder rebuild.
+//
+// Na launch op [bookingsGoLiveAt] heeft dit hele systeem geen effect meer
+// (de date-gate is dan überhaupt al open).
 const List<String> bypassEmails = [
   'apple-review@pluggoapp.nl',
+  'google-review@pluggoapp.nl',
   'm.sloothovenier@gmail.com',
   'rakawakka@gmail.com',
 ];
 
+// Cache: staat de huidige ingelogde user op `public.bypass_emails`?
+// Wordt gevuld door [refreshBypassEmailCache], dat we vanuit main() en
+// vanuit de auth-state listener aanroepen. Default false zodat we bij
+// onbekendheid terugvallen op de date-gate (veilig: niemand-bypass).
+bool _dbBypassEmailMatched = false;
+
+/// Fetcht of de huidige user op `public.bypass_emails` staat en cachet
+/// het resultaat. Roep aan na elke auth state change — bij login wil je
+/// 'm voor de juiste user opnieuw checken, bij logout wil je 'm op false
+/// hebben staan zodat de date-gate weer actief is.
+///
+/// Faalt stil bij netwerk- of RLS-fouten: dan blijft de oude cache staan
+/// (of false als 'ie nooit gezet is). Een tester die geen netwerk heeft
+/// kan dus de eerste keer niet bypassen — dat is acceptabel.
+Future<void> refreshBypassEmailCache() async {
+  try {
+    final email = Supabase.instance.client.auth.currentUser?.email;
+    if (email == null) {
+      _dbBypassEmailMatched = false;
+      return;
+    }
+    // RLS staat alleen toe dat de user z'n eigen rij ziet, dus een hit
+    // betekent: deze user staat op de lijst. count: exact is precies wat
+    // we willen — we hebben de rij-inhoud niet nodig, alleen of 'ie bestaat.
+    final response = await Supabase.instance.client
+        .from('bypass_emails')
+        .select('email')
+        .eq('email', email.toLowerCase())
+        .limit(1)
+        .maybeSingle();
+    _dbBypassEmailMatched = response != null;
+  } catch (_) {
+    // Stille fallback: laat cache staan, val terug op de hardcoded lijst
+    // en de date-gate. Niet erg — testers kunnen later opnieuw inloggen.
+  }
+}
+
 bool get bookingsAreLive {
   try {
     final email = Supabase.instance.client.auth.currentUser?.email;
-    if (email != null && bypassEmails.contains(email)) return true;
+    if (email != null && bypassEmails.contains(email.toLowerCase())) {
+      return true;
+    }
   } catch (_) {
     // Supabase nog niet geïnitialiseerd — val terug op de date-gate
   }
+  if (_dbBypassEmailMatched) return true;
   return !DateTime.now().isBefore(bookingsGoLiveAt);
 }
-// Hoeveel hele dagen tot de launch, in datums (dus niet uren). Op 30 juni
-// staat er "over 1 dag" en op 1 juli "vandaag!", ook al is het 23:59.
+// Hoeveel hele dagen tot de launch, in datums (dus niet uren). Op 6 juli
+// staat er "over 1 dag" en op 7 juli "vandaag!", ook al is het 23:59.
 int get daysUntilLaunch {
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
@@ -73,12 +134,13 @@ int get daysUntilLaunch {
   final diff = launchDay.difference(today).inDays;
   return diff < 0 ? 0 : diff;
 }
-const String launchDateLabel = '1 juli 2026';
+const String launchDateLabel = '7 juli 2026';
 
 // ============================================
-// IBAN-helpers — voor uitbetalingen aan eigenaren via Mollie/SEPA.
-// Zonder geldige IBAN kunnen we de 95%-share niet doorbetalen, dus
-// blokkeren we het paal-toevoegen-flow tot er een IBAN op het profiel staat.
+// IBAN-helpers — voor uitbetalingen aan eigenaren via Stripe Connect (SEPA).
+// Zonder geldige IBAN kunnen we het host-aandeel (paalprijs − €0,03/kWh)
+// niet doorbetalen, dus blokkeren we het paal-toevoegen-flow tot er een
+// IBAN op het profiel staat.
 // ============================================
 
 /// Heel pragmatische NL-IBAN-check: 18 tekens, begint met "NL", daarna
@@ -128,33 +190,125 @@ Future<String?> fetchCurrentUserIban() async {
 }
 
 // ============================================
-// Pricing helpers — must mirror the formula in supabase/functions/
-// create-payment/index.ts. Als je daar iets aanpast, hier ook.
+// Pricing helpers — pay-after-charge model.
+// Owner vult na de laadbeurt het werkelijk afgenomen kWh in; daarmee is
+// het exacte bedrag bekend. Geen schatting meer vooraf.
+// Formules moeten matchen met supabase/functions/create-payment-stripe/index.ts.
+//
+// Fee-model (per mei 2026): vaste fee van €0,03/kWh aan beide kanten +
+// een eenmalige €0,40 transactiefee bij mini-sessies onder 10 kWh.
+//   • Booker betaalt: kWh × (paalprijs + €0,03)  + €0,40 als kWh < 10
+//   • Host ontvangt:  kWh × (paalprijs − €0,03)  — altijd, los van sessiegrootte
+//   • Pluggo houdt:   kWh × €0,06 + (kWh < 10 ? €0,40 : 0)
+// Het is geen percentage; bewust gekozen omdat de iDEAL-fee van Stripe
+// een vast bedrag (~€0,29) is waar een procentuele fee bij kleine sessies
+// onder zou duiken. De €0,40 small-session fee dekt expliciet de
+// iDEAL-transactiekosten bij sessies <10 kWh; bij grotere sessies
+// dekt de €0,06/kWh ze ruimschoots zelf.
 // ============================================
 
-/// Aanname voor laadsnelheid — zelfde waarde als in de edge function.
-/// 7,4 kW = standaard eenfase 32A home charger in NL.
-const double estimatedKwPerHour = 7.4;
+/// Booker-fee in euro per kWh — wordt bovenop de paalprijs getoond én
+/// betaald. Staat ook in T&Cs en FAQ.
+const double bookerFeePerKwh = 0.03;
 
-/// Service fee percentage — ook in T&Cs en FAQ.
-const double serviceFeeRate = 0.05;
+/// Host-fee in euro per kWh — wordt afgetrokken van de paalprijs bij
+/// de uitbetaling aan de eigenaar. Staat ook in T&Cs en FAQ.
+const double hostFeePerKwh = 0.03;
 
-/// Schat het bedrag (in euro) dat een boeking gaat kosten op basis van
-/// duur × geschat kWh × prijs per kWh. Zelfde formule als de edge function,
-/// maar dan client-side zodat we 'm op de bookings-tile kunnen tonen
-/// vóórdat de gebruiker op "Betalen" tikt.
-double estimateBookingTotalEuro(Booking b) {
+/// Totaal Pluggo-aandeel per kWh (booker- + host-fee).
+const double pluggoFeePerKwh = bookerFeePerKwh + hostFeePerKwh;
+
+/// Drempel waaronder een sessie als "mini-sessie" geldt; daaronder geldt
+/// een extra vaste transactiefee bovenop het kWh-tarief. Komt ook in
+/// T&Cs en FAQ.
+const double smallSessionThresholdKwh = 10.0;
+
+/// Eenmalige extra fee (euro) die de booker betaalt bij sessies onder
+/// [smallSessionThresholdKwh]. Bedoeld om de iDEAL-kosten van Stripe op
+/// kleine sessies te dekken. Wordt NIET afgetrokken van het host-aandeel
+/// — die ontvangt altijd zijn volle paalprijs minus €0,03/kWh.
+const double smallSessionFeeEur = 0.40;
+
+/// Hoeveel dagen mag een betaalverzoek openstaan voordat de boeker
+/// nieuwe boekingen niet meer mag maken. Komt ook in T&Cs te staan.
+const int maxDaysOutstandingPayment = 7;
+
+/// Parse charger.price (String, bv "0.30") naar double. Accepteert zowel
+/// "." als "," als decimaalscheidingsteken.
+double parseChargerPrice(String price) {
+  return double.tryParse(price.replaceAll(',', '.')) ?? 0.0;
+}
+
+/// Wat de booker per kWh ziet en betaalt: paalprijs + €0,03 servicefee.
+double bookerPricePerKwh(String chargerPrice) {
+  return parseChargerPrice(chargerPrice) + bookerFeePerKwh;
+}
+
+/// Wat de host per kWh netto ontvangt: paalprijs − €0,03 servicefee.
+double hostNetPricePerKwh(String chargerPrice) {
+  final p = parseChargerPrice(chargerPrice) - hostFeePerKwh;
+  return p < 0 ? 0 : p;
+}
+
+/// "€0,33/kWh"-stijl label voor wat de booker ziet (incl. servicefee).
+String formatBookerPricePerKwhLabel(String chargerPrice) {
+  final p = bookerPricePerKwh(chargerPrice);
+  return '€${p.toStringAsFixed(2).replaceAll('.', ',')}/kWh';
+}
+
+/// Geeft de small-session fee (euro) voor de gegeven sessiegrootte.
+/// Bij sessies onder [smallSessionThresholdKwh] is dat [smallSessionFeeEur],
+/// anders 0.
+double smallSessionFeeFor(double kwh) {
+  if (kwh <= 0) return 0;
+  return kwh < smallSessionThresholdKwh ? smallSessionFeeEur : 0;
+}
+
+/// Bereken het totale bedrag (euro) dat de boeker betaalt voor een boeking:
+/// kWh × (paalprijs + €0,03 booker-fee) + €0,40 als kWh < 10.
+double calculateBookingTotalEuro(double kwh, String chargerPrice) {
+  if (kwh <= 0) return 0;
+  final price = parseChargerPrice(chargerPrice);
+  if (price <= 0) return 0;
+  return kwh * (price + bookerFeePerKwh) + smallSessionFeeFor(kwh);
+}
+
+/// Totaal Pluggo-aandeel (euro) voor een boeking: kWh × €0,06 + eventuele
+/// small-session fee. Host-aandeel wordt NIET verlaagd door de small-session
+/// fee.
+double calculatePluggoFeeEuro(double kwh) {
+  if (kwh <= 0) return 0;
+  return kwh * pluggoFeePerKwh + smallSessionFeeFor(kwh);
+}
+
+/// Bereken het bedrag voor een boeking als de owner al kWh heeft ingevuld.
+/// Returnt null als kWh nog niet bekend is.
+///
+/// LET OP: gebruik dit alleen voor preview-doeleinden (bv. de owner toont
+/// een live-berekening tijdens kWh invullen). Voor het tonen van het bedrag
+/// dat de boeker daadwerkelijk gaat betalen — of al heeft betaald — gebruik
+/// [bookingPayableEuro], die voorrang geeft aan total_amount_cents.
+double? calculatedBookingEuro(Booking b) {
+  final kwh = b.kwhConsumed;
   final charger = b.charger;
-  if (charger == null) return 0;
-  final hours = b.duration.inMinutes / 60.0;
-  if (hours <= 0) return 0;
-  // charger.price is een String ("0.30") — parsen naar double.
-  // Accepteer zowel "." als "," als decimaal-scheidingsteken voor de zekerheid.
-  final priceParsed =
-      double.tryParse(charger.price.replaceAll(',', '.')) ?? 0.0;
-  if (priceParsed <= 0) return 0;
-  final estimatedKwh = hours * estimatedKwPerHour;
-  return estimatedKwh * priceParsed;
+  if (kwh == null || charger == null) return null;
+  return calculateBookingTotalEuro(kwh, charger.price);
+}
+
+/// Het bedrag dat de boeker gaat betalen of al heeft betaald.
+///
+/// Voorkeur: `total_amount_cents` op de boeking — dit is vastgezet door de
+/// owner op het moment van het betaalverzoek en wijzigt daarna niet meer,
+/// ook niet als de owner de paalprijs aanpast. Dit garandeert dat wat de
+/// booker in de UI ziet 1-op-1 matcht met wat Stripe daadwerkelijk charged.
+///
+/// Fallback: `kWh × paalprijs` voor edge cases waar `total_amount_cents` om
+/// een of andere reden nog niet gevuld zou zijn (zou niet horen voor te komen
+/// na het betaalverzoek, maar defensief is goedkoop).
+double? bookingPayableEuro(Booking b) {
+  final tac = b.totalAmountCents;
+  if (tac != null && tac > 0) return tac / 100.0;
+  return calculatedBookingEuro(b);
 }
 
 /// Format een cent-bedrag naar "€12,34"-stijl voor UI-weergave.
@@ -184,6 +338,113 @@ class AppColors {
   static const textSecondary = Color(0xFF6B6F76);
   static const divider = Color(0xFFE5E7EB);
   static const danger = Color(0xFFE53935);
+  // Waarschuwingstinten — gebruikt voor "vereiste actie" banners en
+  // setup-tips (bv. lege beschikbaarheid). Iets zachter dan danger.
+  static const warning = Color(0xFFE08600);
+  static const warningSoft = Color(0xFFFFF4E0);
+  static const warningDark = Color(0xFF8A5300);
+
+  // Pluggo Pionier — gouden tinten voor de badge op profielen van
+  // vroeg-adopters. Iets warmer dan `solar` en bewust premium.
+  static const pioneer = Color(0xFFD4A437);     // Klassiek goud
+  static const pioneerDark = Color(0xFF8C6A1A); // Voor tekst/icon-contrast
+  static const pioneerSoft = Color(0xFFFDF6E0); // Achtergrond voor badge-pill
+}
+
+// ============================================
+// PioneerBadge — gouden badge voor Pluggo Pioniers (vroeg-adopters).
+// Drie groottes:
+//   • PioneerBadgeSize.small  — compacte pill voor charger-cards op de map
+//   • PioneerBadgeSize.medium — voor charger-detailscherm + onder profielnaam
+//   • PioneerBadgeSize.large  — prominent op het profielscherm
+// ============================================
+enum PioneerBadgeSize { small, medium, large }
+
+class PioneerBadge extends StatelessWidget {
+  final PioneerBadgeSize size;
+  final bool showLabel; // false = alleen icoon (handig op kleine kaartjes)
+
+  const PioneerBadge({
+    Key? key,
+    this.size = PioneerBadgeSize.medium,
+    this.showLabel = true,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final double iconSize;
+    final double fontSize;
+    final EdgeInsetsGeometry padding;
+    switch (size) {
+      case PioneerBadgeSize.small:
+        iconSize = 12;
+        fontSize = 10;
+        padding =
+            const EdgeInsets.symmetric(horizontal: 6, vertical: 2);
+        break;
+      case PioneerBadgeSize.medium:
+        iconSize = 14;
+        fontSize = 12;
+        padding =
+            const EdgeInsets.symmetric(horizontal: 8, vertical: 3);
+        break;
+      case PioneerBadgeSize.large:
+        iconSize = 18;
+        fontSize = 14;
+        padding =
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 6);
+        break;
+    }
+
+    final radius = size == PioneerBadgeSize.large ? 14.0 : 10.0;
+
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFE7A0), Color(0xFFD4A437)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(radius),
+        boxShadow: size == PioneerBadgeSize.large
+            ? [
+                BoxShadow(
+                  color: AppColors.pioneer.withOpacity(0.35),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ]
+            : null,
+        border: Border.all(
+          color: AppColors.pioneerDark.withOpacity(0.4),
+          width: 0.6,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.workspace_premium_rounded,
+            size: iconSize,
+            color: AppColors.pioneerDark,
+          ),
+          if (showLabel) ...[
+            SizedBox(width: size == PioneerBadgeSize.small ? 3 : 5),
+            Text(
+              'Pionier',
+              style: GoogleFonts.inter(
+                fontSize: fontSize,
+                fontWeight: FontWeight.w700,
+                color: AppColors.pioneerDark,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 // Zachte schaduw die we overal gebruiken voor een "lifted card" look
@@ -651,10 +912,28 @@ Future<LatLng> geocodeAddress(String address) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Firebase init eerst — dit zet alleen de SDK op, vraagt nog géén push-
+  // permissie. Dat doen we pas op het juiste moment in de app.
+  await PluggoPush.instance.init();
+
   await Supabase.initialize(
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
   );
+
+  // Stripe SDK initialiseren — alleen de publishable key, geen Apple Pay
+  // merchant identifier (die voegen we toe als we Apple Pay aanzetten;
+  // voor launch is iDEAL + kaart genoeg). applySettings() is async maar
+  // hoeft niet ge-awaited te worden — Stripe queue't calls tot 'ie ready is.
+  Stripe.publishableKey = stripePublishableKey;
+  await Stripe.instance.applySettings();
+
+  // Vul de bypass-cache zodra Supabase staat. Als er een actieve session is,
+  // checkt 'ie meteen of de user op de DB-lijst staat zodat de date-gate al
+  // open is bij de eerste render. Geen await op het Future: we willen de
+  // UI niet vertragen — bij een trage refresh ziet de tester even een
+  // gesloten gate die binnen ~500ms opengaat zodra de fetch terug is.
+  unawaited(refreshBypassEmailCache());
 
   runApp(const NeighbourChargeApp());
 }
@@ -679,6 +958,16 @@ class Charger {
   final List<String> photoUrls;
   final bool cableIncluded;
   final String accessType; // 'open', 'gate_code', 'doorbell', 'key', 'other'
+  // Pionier-status van de eigenaar. Bepaalt of we de gouden badge tonen en
+  // of deze paal voorrang krijgt in search results binnen hetzelfde
+  // postcode-gebied. Komt uit profiles.is_pioneer via een PostgREST embed.
+  final bool ownerIsPioneer;
+  // True als `position` en `address` de exacte locatie zijn (owner of
+  // confirmed booker). False als ze fuzzy zijn (publieke kaart, niet-
+  // geboekte detail). De UI gebruikt deze vlag om "Open in Maps"-knoppen
+  // te verbergen en een waarschuwing te tonen. Zie migratie 0010 en de
+  // `chargers_public` view voor de server-kant.
+  final bool isExactLocation;
 
   const Charger({
     required this.id,
@@ -696,18 +985,44 @@ class Charger {
     this.photoUrls = const [],
     this.cableIncluded = true,
     this.accessType = 'open',
+    this.ownerIsPioneer = false,
+    this.isExactLocation = false,
   });
 
-  // Van een database-rij (Map) naar een Charger-object
-  factory Charger.fromMap(Map<String, dynamic> map) {
+  // Van een database-rij (Map) naar een Charger-object.
+  //
+  // `isExactLocation` moet door de caller worden meegegeven op basis van
+  // de bron-tabel: `true` als de rij uit `chargers` komt (owner of
+  // confirmed booker mag exacte locatie zien), `false` als hij uit de
+  // `chargers_public` view komt (fuzzy locatie). Default false — bij
+  // twijfel tonen we fuzzy, never exact.
+  factory Charger.fromMap(
+    Map<String, dynamic> map, {
+    bool isExactLocation = false,
+  }) {
     final photosRaw = map['photo_urls'];
     final photos = photosRaw is List
         ? photosRaw.whereType<String>().toList()
         : <String>[];
+    // PostgREST embed levert profiles als nested object (`owner_profile`)
+    // óf als losse `owner_is_pioneer` als we 't expliciet flattenen.
+    // Bij geen embed (oude code-paden) is dit `false` — geen Pionier-badge.
+    bool ownerIsPioneer = map['owner_is_pioneer'] as bool? ?? false;
+    final ownerProfile = map['owner_profile'];
+    if (ownerProfile is Map &&
+        ownerProfile['is_pioneer'] is bool) {
+      ownerIsPioneer = ownerProfile['is_pioneer'] as bool;
+    }
+    // `chargers_public` view geeft (nog) het volledige adres terug; we
+    // derivaten hier client-side het fuzzy adres (alleen postcode+plaats).
+    // Eigenaar/confirmed booker krijgen het echte adres één-op-één.
+    final rawAddress = map['address'] as String;
+    final displayedAddress =
+        isExactLocation ? rawAddress : fuzzyAddress(rawAddress);
     return Charger(
       id: map['id'] as String,
       name: map['name'] as String,
-      address: map['address'] as String,
+      address: displayedAddress,
       price: (map['price'] as num).toStringAsFixed(2),
       type: map['type'] as String,
       available: map['available'] as bool? ?? true,
@@ -723,8 +1038,52 @@ class Charger {
       photoUrls: photos,
       cableIncluded: map['cable_included'] as bool? ?? true,
       accessType: map['access_type'] as String? ?? 'open',
+      ownerIsPioneer: ownerIsPioneer,
+      isExactLocation: isExactLocation,
     );
   }
+}
+
+// Maakt een fuzzy-versie van een adres door huisnummer + straatnaam weg te
+// laten en alleen postcode + plaats (of alleen plaats) over te houden.
+// Gebruikt op de publieke kaart en de detail-screen voor niet-boekers,
+// zodat het thuisadres van de eigenaar niet wordt onthuld.
+//
+// "Berkenlaan 14, 3811 AB Amersfoort"   → "3811 AB Amersfoort"
+// "Hoofdstraat 1A 1234 CD Utrecht"       → "1234 CD Utrecht"
+// "testlaan 5 Amersfoort"                → "Amersfoort"
+// "kruiskamp 14 amersfoort"              → "amersfoort"
+// "storkstraat 6 Leusden"                → "Leusden"
+// "Onbekend adres"                       → "Onbekend adres" (fallback)
+//
+// Algoritme:
+//   1) Postcode-anker: NL-postcode (4 cijfers + 2 hoofdletters) — pak alles
+//      vanaf de postcode.
+//   2) Huisnummer-anker: eerste huisnummer in de string — pak alles erna.
+//   3) Geen van beide gevonden: geef het origineel terug (geen leak — er
+//      stond toch geen straatnummer in).
+String fuzzyAddress(String exact) {
+  final trimmed = exact.trim();
+
+  // 1) Postcode-pad — "...3811 AB Amersfoort" → "3811 AB Amersfoort"
+  final pcMatch =
+      RegExp(r'(\d{4}\s?[A-Z]{2}.*)$').firstMatch(trimmed);
+  if (pcMatch != null) {
+    return pcMatch.group(1)!.trim();
+  }
+
+  // 2) Huisnummer-pad — "testlaan 5 Amersfoort" → "Amersfoort"
+  //    \d+[A-Za-z]? vangt huisnummers met optionele letter-suffix (5, 14A).
+  //    Daarna optionele komma + whitespace, dan capture wat overblijft.
+  final nrMatch =
+      RegExp(r'\d+[A-Za-z]?\s*,?\s*(.+)$').firstMatch(trimmed);
+  if (nrMatch != null) {
+    final after = nrMatch.group(1)!.trim();
+    if (after.isNotEmpty) return after;
+  }
+
+  // 3) Geen huisnummer/postcode in het adres — niets te fuzzen.
+  return trimmed;
 }
 
 // Display-labels en iconen voor access_type (één bron van waarheid).
@@ -811,10 +1170,13 @@ class Booking {
   final String? userName;
   final String? userEmail;
   final bool viewedByOwner;
-  // Payment-velden — toegevoegd in Mollie Fase 1.
+  // Payment-velden — Stripe Connect Express + pay-after-charge refactor.
   // payment_status enum: 'unpaid' | 'pending' | 'paid' | 'failed' | 'refunded' | 'partially_refunded'
   final String paymentStatus;
   final int? totalAmountCents;
+  // Pay-after-charge: owner vult kWh in na de laadbeurt, dan kan boeker betalen.
+  final double? kwhConsumed;
+  final DateTime? paymentRequestedAt;
   // Optioneel: charger-info uit een joined query
   final Charger? charger;
 
@@ -831,15 +1193,34 @@ class Booking {
     this.viewedByOwner = false,
     this.paymentStatus = 'unpaid',
     this.totalAmountCents,
+    this.kwhConsumed,
+    this.paymentRequestedAt,
     this.charger,
   });
 
   factory Booking.fromMap(Map<String, dynamic> map) {
-    // Als we een joined charger meekregen, parsen we 'm ook
+    // Als we een joined charger meekregen, parsen we 'm ook. De
+    // PostgREST-join leest uit de echte `chargers`-tabel (incl. exacte
+    // lat/lng/address), maar de booker mag het exacte adres pas zien
+    // ná confirmation. Daarom: status == 'confirmed' → exact, anders
+    // fuzzy. Zie migratie 0010.
     Charger? charger;
     final chargerMap = map['chargers'];
     if (chargerMap is Map<String, dynamic>) {
-      charger = Charger.fromMap(chargerMap);
+      final isConfirmed = map['status'] == 'confirmed';
+      charger = Charger.fromMap(chargerMap, isExactLocation: isConfirmed);
+    }
+    // kwh_consumed is numeric in DB → komt als num of String binnen
+    double? parseKwh(dynamic v) {
+      if (v == null) return null;
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v);
+      return null;
+    }
+    DateTime? parseTs(dynamic v) {
+      if (v == null) return null;
+      if (v is String) return DateTime.tryParse(v)?.toLocal();
+      return null;
     }
     return Booking(
       id: map['id'] as String,
@@ -854,16 +1235,31 @@ class Booking {
       viewedByOwner: (map['viewed_by_owner'] as bool?) ?? false,
       paymentStatus: (map['payment_status'] as String?) ?? 'unpaid',
       totalAmountCents: map['total_amount_cents'] as int?,
+      kwhConsumed: parseKwh(map['kwh_consumed']),
+      paymentRequestedAt: parseTs(map['payment_requested_at']),
       charger: charger,
     );
   }
 
   Duration get duration => endTime.difference(startTime);
 
-  /// True als de eigenaar de boeking heeft goedgekeurd én de boeker
-  /// nog moet betalen. Toont in de UI de "Betalen"-knop.
+  /// True als de boeking is afgelopen.
+  bool get isFinished => DateTime.now().isAfter(endTime);
+
+  /// True als de owner kWh moet invullen voor deze boeking.
+  /// Voorwaarden: confirmed, eindtijd voorbij, kwh nog niet ingevuld,
+  /// nog niet al betaald.
+  bool get awaitingKwhInput =>
+      status == 'confirmed' &&
+      isFinished &&
+      kwhConsumed == null &&
+      paymentStatus != 'paid';
+
+  /// True als de owner kWh heeft ingevuld én de boeker nog moet betalen.
+  /// Toont in de UI de "Betalen"-knop met het exacte bedrag.
   bool get awaitingPayment =>
       status == 'confirmed' &&
+      paymentRequestedAt != null &&
       (paymentStatus == 'unpaid' || paymentStatus == 'pending' ||
           paymentStatus == 'failed');
 
@@ -1109,6 +1505,9 @@ class NeighbourChargeApp extends StatelessWidget {
     return MaterialApp(
       title: 'Pluggo',
       debugShowCheckedModeBanner: false,
+      // Global ScaffoldMessenger zodat PluggoPush vanuit foreground-handlers
+      // SnackBars kan tonen zonder een BuildContext te kennen.
+      scaffoldMessengerKey: PluggoPush.messengerKey,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -1164,6 +1563,29 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
+  // Onthouden of we voor de huidige sessie de stille push-registratie al
+  // hebben gedaan, zodat we het maar één keer per sessie aanroepen.
+  String? _pushRegisteredForUserId;
+
+  void _maybePushRegister() {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _pushRegisteredForUserId = null;
+      return;
+    }
+    if (_pushRegisteredForUserId == user.id) return;
+    _pushRegisteredForUserId = user.id;
+    // Geen await — pas op de achtergrond, mag de UI niet blokkeren.
+    PluggoPush.instance.maybeRegisterAfterLogin();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Bij cold start met bestaande sessie ook proberen.
+    _maybePushRegister();
+  }
+
   @override
   Widget build(BuildContext context) {
     // Luister naar auth state changes zodat UI direct reageert op login/logout
@@ -1172,7 +1594,18 @@ class _AuthGateState extends State<AuthGate> {
       builder: (context, snapshot) {
         // Check de initiële session (direct na app-start)
         final session = supabase.auth.currentSession;
+        // Bypass-cache opnieuw vullen bij iedere auth-state-change. Bij
+        // login: check of deze user op de DB-lijst staat. Bij logout: zet
+        // 'm op false zodat de date-gate weer dichtgaat. Fire-and-forget.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(refreshBypassEmailCache());
+        });
         if (session != null) {
+          // Stille registratie — alleen als user al permissie heeft gegeven.
+          // De systeem-popup vragen we pas op een "echt event" moment.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _maybePushRegister();
+          });
           return const HomeScreen();
         }
         return const LoginScreen();
@@ -1221,6 +1654,15 @@ class _HomeScreenState extends State<HomeScreen> {
   int _unreadReviews = 0;
   // Aantal ongelezen chatberichten in alle gesprekken
   int _unreadMessages = 0;
+  // Eigen-actie buckets (geen viewed-flag, puur status-afgeleid):
+  //   _kwhNeededOwner: afgelopen confirmed-boekingen op MIJN palen waar de
+  //                    kWh nog ingevuld moet worden voordat de boeker kan betalen.
+  //   _payNeededBooker: confirmed-boekingen waar IK boeker ben en de owner
+  //                     het kWh-bedrag al heeft klaargezet — ik moet betalen.
+  // Beide tellen mee in de profielicoon-badge én in een eigen badge per
+  // menu-item, zodat een vereiste actie nooit meer onopgemerkt blijft.
+  int _kwhNeededOwner = 0;
+  int _payNeededBooker = 0;
 
   // Wordt true zodra de user permissie heeft gegeven; dan tonen we de blauwe dot
   bool _showMyLocation = false;
@@ -1234,6 +1676,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUnreadIncoming();
     _loadUnreadReviews();
     _loadUnreadMessages();
+    _loadKwhNeededOwner();
+    _loadPayNeededBooker();
     // Bij elke toetsaanslag direct filteren (MVP-schaal is dit prima)
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text);
@@ -1305,7 +1749,8 @@ class _HomeScreenState extends State<HomeScreen> {
         icon: BitmapDescriptor.defaultMarkerWithHue(hue),
         infoWindow: InfoWindow(
           title: charger.name,
-          snippet: '€${charger.price}/kWh · ${charger.type}',
+          // Booker-facing: paalprijs + €0,03 servicefee = wat de booker betaalt.
+          snippet: '${formatBookerPricePerKwhLabel(charger.price)} · ${charger.type}',
         ),
         onTap: () => _openDetail(charger),
       );
@@ -1551,6 +1996,55 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Aantal afgelopen boekingen op MIJN palen waar ik nog kWh moet invullen
+  // voordat de boeker kan betalen. Filtert in de DB op de meeste criteria;
+  // de "is afgelopen"-check is end_time < now() — iets wat we hier rechtstreeks
+  // aan Supabase meegeven via .lt zodat we ook geen null-rijen meekrijgen.
+  Future<void> _loadKwhNeededOwner() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final nowIso = DateTime.now().toUtc().toIso8601String();
+      final data = await supabase
+          .from('bookings')
+          .select('id, chargers!inner(owner_id)')
+          .eq('chargers.owner_id', userId)
+          .eq('status', 'confirmed')
+          .filter('kwh_consumed', 'is', null)
+          .neq('payment_status', 'paid')
+          .lt('end_time', nowIso);
+      if (!mounted) return;
+      setState(() {
+        _kwhNeededOwner = (data as List).length;
+      });
+    } catch (_) {
+      // Stil falen: badge blijft op vorige waarde
+    }
+  }
+
+  // Aantal van mijn eigen boekingen waar ik nog moet betalen — dwz. de owner
+  // heeft kWh ingevuld (payment_requested_at is not null) maar de status is
+  // nog unpaid/pending/failed.
+  Future<void> _loadPayNeededBooker() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final data = await supabase
+          .from('bookings')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('status', 'confirmed')
+          .not('payment_requested_at', 'is', null)
+          .neq('payment_status', 'paid');
+      if (!mounted) return;
+      setState(() {
+        _payNeededBooker = (data as List).length;
+      });
+    } catch (_) {
+      // Stil falen
+    }
+  }
+
   // Aantal ongelezen chatberichten in al mijn gesprekken
   Future<void> _loadUnreadMessages() async {
     final userId = supabase.auth.currentUser?.id;
@@ -1592,14 +2086,87 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      // Stap 1: alle palen ophalen, gesorteerd op aanmaakdatum (zoals
+      // voorheen). We bevragen `chargers_public` (view), die FUZZY lat/lng
+      // teruggeeft — exact thuisadres blijft voor de eigenaar / confirmed
+      // booker. Zie migratie 0010_fuzzy_charger_location.sql.
+      //
+      // De view includeert al een `owner_profile` JSON met is_pioneer, dus
+      // de oude separate profiles-query (hieronder) wordt feitelijk
+      // redundant; we laten 'm voorlopig staan als veiligheidsnet voor
+      // het geval een rij om wat voor reden dan ook geen embed heeft.
       final data = await supabase
-          .from('chargers')
+          .from('chargers_public')
           .select()
           .order('created_at', ascending: false);
 
-      final chargers = (data as List)
-          .map((row) => Charger.fromMap(row as Map<String, dynamic>))
+      var chargers = (data as List)
+          .map((row) => Charger.fromMap(
+                row as Map<String, dynamic>,
+                isExactLocation: false,
+              ))
           .toList();
+
+      // Stap 2: voor alle unieke owner-IDs ophalen of ze Pionier zijn.
+      // Eén losse query — minimale roundtrip, voorkomt N+1.
+      final ownerIds = chargers
+          .map((c) => c.ownerId)
+          .whereType<String>()
+          .toSet()
+          .toList();
+      final pioneerIds = <String>{};
+      if (ownerIds.isNotEmpty) {
+        try {
+          final profileRows = await supabase
+              .from('profiles')
+              .select('id, is_pioneer')
+              .inFilter('id', ownerIds)
+              .eq('is_pioneer', true);
+          for (final r in profileRows as List) {
+            final m = r as Map<String, dynamic>;
+            final pid = m['id'] as String?;
+            if (pid != null) pioneerIds.add(pid);
+          }
+        } catch (_) {
+          // Niet fataal — bij een fout tonen we gewoon geen Pionier-badges.
+        }
+      }
+
+      // Pionier-vlag op de Charger-objecten zetten (we maken nieuwe instances
+      // omdat Charger immutable is). We behouden bewust isExactLocation: false
+      // — deze lijst komt uit de publieke map en blijft fuzzy.
+      chargers = chargers
+          .map((c) => Charger(
+                id: c.id,
+                name: c.name,
+                address: c.address,
+                price: c.price,
+                type: c.type,
+                available: c.available,
+                solar: c.solar,
+                position: c.position,
+                description: c.description,
+                instructions: c.instructions,
+                ownerId: c.ownerId,
+                ownerEmail: c.ownerEmail,
+                photoUrls: c.photoUrls,
+                cableIncluded: c.cableIncluded,
+                accessType: c.accessType,
+                isExactLocation: false,
+                ownerIsPioneer:
+                    c.ownerId != null && pioneerIds.contains(c.ownerId),
+              ))
+          .toList();
+
+      // Sorteer: Pioniers bovenaan, daarna op aanmaakdatum (zoals voorheen).
+      // Geo-afstand komt elders aan bod (filter op kaart), hier gaat het om
+      // de list-volgorde in het bottom sheet / search results.
+      chargers.sort((a, b) {
+        if (a.ownerIsPioneer != b.ownerIsPioneer) {
+          return a.ownerIsPioneer ? -1 : 1;
+        }
+        return 0; // behoud created_at-volgorde uit de query
+      });
 
       // Reviews ophalen om gemiddelde per paal te berekenen.
       // Niet fataal — bij een fout tonen we gewoon geen sterren.
@@ -1652,9 +2219,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openAdd() async {
-    // IBAN-gate: eigenaren krijgen 95% van elke boeking, dus zonder IBAN
-    // kunnen we niet uitbetalen. Vraag 'm hier op vóórdat ze de paal-flow in mogen.
-    final ok = await ensureIbanOrPrompt(context);
+    // Stripe-gate: paaleigenaar moet BTW-status hebben ingevuld + Stripe
+    // Connect-account verified (charges_enabled = true) voordat we PaymentIntents
+    // met transfer_data.destination kunnen aanmaken. Zie ensureStripeReadyOrPrompt
+    // voor de twee-staps flow (BTW-vragenlijst + Stripe-hosted KYC).
+    final ok = await ensureStripeReadyOrPrompt(context);
     if (!ok) return;
     final added = await Navigator.push<bool>(
       context,
@@ -1664,6 +2233,61 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (added == true) {
       _loadChargers();
+    }
+  }
+
+  // Handler voor de "Notificaties"-knop in het profielmenu. Drie scenario's:
+  //   • Permissie staat al aan → korte bevestiging via snackbar.
+  //   • Permissie was nog niet gevraagd en user zegt nu ja → snackbar
+  //     "Meldingen aangezet" + token wordt direct geregistreerd in DB.
+  //   • Permissie is (eerder) geweigerd → dialoog met instructies om
+  //     handmatig via OS-instellingen aan te zetten. iOS/Android tonen na
+  //     een eerdere "Niet toestaan" geen tweede dialoog meer.
+  Future<void> _handleNotificationsAction() async {
+    final outcome = await PluggoPush.instance.requestForUserActionButton();
+    if (!mounted) return;
+
+    switch (outcome) {
+      case NotificationActionOutcome.alreadyEnabled:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Meldingen staan al aan'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        break;
+      case NotificationActionOutcome.justEnabled:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Meldingen aangezet'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        break;
+      case NotificationActionOutcome.denied:
+        await showDialog<void>(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Text('Meldingen aanzetten'),
+            content: const Text(
+              'Pluggo mag op dit toestel geen meldingen sturen. Zet ze aan '
+              'via je telefoon-instellingen:\n\n'
+              '1. Open de instellingen van je telefoon\n'
+              '2. Ga naar Apps → Pluggo → Meldingen\n'
+              '   (iOS: Instellingen → Pluggo → Berichtgeving)\n'
+              '3. Zet meldingen aan\n\n'
+              'Sluit Pluggo daarna helemaal af (uit recents vegen) en open '
+              "'m opnieuw. Dan worden je notificaties geregistreerd.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Begrepen'),
+              ),
+            ],
+          ),
+        );
+        break;
     }
   }
 
@@ -1834,8 +2458,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         builder: (_) => const IncomingBookingsScreen(),
                       ),
                     );
-                    // Badge opnieuw ophalen zodra je terug bent
+                    // Badges opnieuw ophalen zodra je terug bent — zowel
+                    // 'nieuwe boeking' als 'kWh nodig' staan in dit scherm.
                     _loadUnreadIncoming();
+                    _loadKwhNeededOwner();
                   },
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
@@ -1859,7 +2485,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: AppColors.textPrimary,
                           ),
                         ),
-                        if (_unreadIncoming > 0) ...[
+                        // Som van nieuwe-boeking + kWh-nodig badges.
+                        // Beide acties leven in IncomingBookingsScreen, dus
+                        // we plakken ze samen tot één duidelijk getal.
+                        if (_unreadIncoming + _kwhNeededOwner > 0) ...[
                           const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -1871,7 +2500,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
-                              '$_unreadIncoming',
+                              '${_unreadIncoming + _kwhNeededOwner}',
                               style: GoogleFonts.inter(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
@@ -1892,14 +2521,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 4),
                 InkWell(
-                  onTap: () {
+                  onTap: () async {
                     Navigator.pop(ctx);
-                    Navigator.push(
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => const MyBookingsScreen(),
                       ),
                     );
+                    // Na terugkeer badge opnieuw ophalen — als de boeker
+                    // 'm betaald heeft moet de telling naar 0.
+                    _loadPayNeededBooker();
                   },
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
@@ -1923,6 +2555,29 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: AppColors.textPrimary,
                           ),
                         ),
+                        // Badge wanneer er een betaling openstaat (owner heeft
+                        // kWh ingevuld maar boeker heeft nog niet betaald).
+                        if (_payNeededBooker > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.danger,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$_payNeededBooker',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
                         const Spacer(),
                         const Icon(
                           Icons.chevron_right_rounded,
@@ -2065,6 +2720,48 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 4),
+                // Notificaties — herstel-knop voor testers/users die de
+                // permissie-dialoog hebben afgewezen of nooit zagen.
+                // Zonder deze knop moeten ze handmatig via OS-instellingen,
+                // wat veel testers niet zelf doen.
+                InkWell(
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _handleNotificationsAction();
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.notifications_active_outlined,
+                          color: AppColors.primary,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Text(
+                          'Notificaties',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textSecondary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
                 const Divider(height: 1, color: AppColors.divider),
                 const SizedBox(height: 4),
                 InkWell(
@@ -2148,6 +2845,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 InkWell(
                   onTap: () async {
                     Navigator.pop(ctx);
+                    // Eerst FCM token los koppelen — anders blijven pushes
+                    // bedoeld voor de oude user op dit toestel binnenkomen
+                    // als iemand anders straks inlogt.
+                    await PluggoPush.instance.unregisterCurrentDevice();
                     await supabase.auth.signOut();
                     // AuthGate regelt de navigatie terug naar login
                   },
@@ -2325,7 +3026,12 @@ class _HomeScreenState extends State<HomeScreen> {
         Navigator.of(context, rootNavigator: true).pop();
       }
 
-      // 5) Sign out — AuthGate stuurt terug naar login
+      // 5) FCM token lokaal weggooien zodat de volgende inlog-user op dit
+      //    device een vers token krijgt (DB-rij wordt sowieso al door
+      //    cascade op auth.users.delete opgeruimd).
+      await PluggoPush.instance.unregisterCurrentDevice();
+
+      // 6) Sign out — AuthGate stuurt terug naar login
       await supabase.auth.signOut();
     } catch (e) {
       if (!mounted) return;
@@ -2391,14 +3097,20 @@ class _HomeScreenState extends State<HomeScreen> {
                           _loadUnreadIncoming();
                           _loadUnreadReviews();
                           _loadUnreadMessages();
+                          _loadKwhNeededOwner();
+                          _loadPayNeededBooker();
                         },
                       ),
                       const SizedBox(width: 8),
                       _roundIconButton(
                         icon: Icons.person_outline_rounded,
                         onTap: _showProfileSheet,
-                        badgeCount:
-                            _unreadIncoming + _unreadReviews + _unreadMessages,
+                        // Profielicoon-badge: som van álle vereiste acties.
+                        badgeCount: _unreadIncoming +
+                            _unreadReviews +
+                            _unreadMessages +
+                            _kwhNeededOwner +
+                            _payNeededBooker,
                       ),
                     ],
                   ),
@@ -2573,7 +3285,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 12),
                     // Pre-launch banner — alleen zichtbaar zolang
                     // bookingsAreLive == false. Toont aan iedereen die
-                    // de palenlijst opent dat boekingen op 1 juli open gaan.
+                    // de palenlijst opent dat boekingen op 7 juli open gaan.
                     if (!bookingsAreLive)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -2944,7 +3656,7 @@ Future<bool> ensureIbanOrPrompt(BuildContext context) async {
       content: const Text(
         'Om een paal aan te bieden hebben we je IBAN nodig. '
         'Pluggo int de betalingen van boekers en stort jouw aandeel '
-        '(95%) elke 14 dagen op je rekening.\n\n'
+        '(je paalprijs minus €0,03/kWh servicefee) elke 14 dagen op je rekening.\n\n'
         'Wil je je IBAN nu invullen?',
       ),
       actions: [
@@ -2978,6 +3690,1063 @@ Future<bool> ensureIbanOrPrompt(BuildContext context) async {
   );
   final ibanAfter = await fetchCurrentUserIban();
   return ibanAfter != null;
+}
+
+// ============================================
+// ensureStripeReadyOrPrompt — gate voor de paal-toevoegen-flow onder Stripe.
+//
+// Vervangt ensureIbanOrPrompt() voor Stripe Connect: bij Stripe verzamelt
+// Stripe-hosted KYC zelf IBAN + KvK + identiteit, dus we hoeven die niet
+// langer in-app te vragen. Wel hebben we 2 voorvragen nodig:
+//
+//   1. business_type (particulier/eenmanszaak/bv/overig) — bepaalt of we
+//      straks een KOR-factuur of BTW-factuur genereren. Stripe weet dit niet.
+//   2. stripe_charges_enabled == true — pas dan kunnen we PaymentIntents
+//      met transfer_data.destination = dit account aanmaken.
+//
+// Flow:
+//   • Mist business_type → dialoog → BtwVragenlijstScreen (Save = pop(true))
+//   • Geen Stripe account of charges nog uit → dialoog → StripeOnboardingScreen
+//   • Beide vereisten OK → return true → caller mag AddChargerScreen openen
+//
+// Returnt false zodra de gebruiker ergens afhaakt (cancel / dialoog 'Later').
+// ============================================
+Future<bool> ensureStripeReadyOrPrompt(BuildContext context) async {
+  final userId = supabase.auth.currentUser?.id;
+  if (userId == null) return false;
+
+  // 1. Eén roundtrip naar de DB — pak alles wat we nodig hebben.
+  Map<String, dynamic>? row;
+  try {
+    row = await supabase
+        .from('profiles')
+        .select('business_type, stripe_account_id, stripe_charges_enabled')
+        .eq('id', userId)
+        .maybeSingle();
+  } catch (e) {
+    debugPrint('ensureStripeReadyOrPrompt: fetch failed: $e');
+    if (!context.mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Kon profiel niet ophalen, probeer opnieuw')),
+    );
+    return false;
+  }
+
+  final businessType = row?['business_type'] as String?;
+  final stripeAccountId = row?['stripe_account_id'] as String?;
+  final chargesEnabled = (row?['stripe_charges_enabled'] as bool?) ?? false;
+
+  // 2. Check 1 — BTW-vragenlijst. Dit moet áltijd eerst, omdat de
+  // stripe-onboard-account edge function 409 teruggeeft zonder business_type.
+  if (businessType == null) {
+    if (!context.mounted) return false;
+    final goToBtw = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Even 3 korte vragen'),
+        content: const Text(
+          'Voordat je je paal aanbiedt vragen we 3 dingen over je '
+          'belastingsituatie. Dit hebben we nodig om straks de juiste '
+          'factuur voor je te maken.\n\n'
+          'Duurt minder dan een minuut.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Starten'),
+          ),
+        ],
+      ),
+    );
+    if (goToBtw != true) return false;
+    if (!context.mounted) return false;
+
+    final btwSaved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const BtwVragenlijstScreen()),
+    );
+    if (btwSaved != true) return false;
+    // BTW gelukt — val door naar Stripe-check hieronder.
+  }
+
+  // 3. Check 2 — Stripe Connect account verified.
+  // chargesEnabled is true alleen ná succesvolle KYC-verificatie door Stripe.
+  if (!chargesEnabled) {
+    if (!context.mounted) return false;
+    final goToStripe = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Verifiëren bij Stripe'),
+        content: Text(
+          stripeAccountId == null
+              ? 'Pluggo gebruikt Stripe om betalingen veilig af te handelen. '
+                'We sturen je nu door naar Stripe voor een korte verificatie '
+                '(KvK, IBAN, identiteit). Duurt 3–5 minuten.\n\n'
+                'Pas daarna kun je je eerste paal aanbieden.'
+              : 'Je Stripe-verificatie is nog niet afgerond. '
+                'We sturen je opnieuw naar Stripe om \'m af te maken.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Naar Stripe'),
+          ),
+        ],
+      ),
+    );
+    if (goToStripe != true) return false;
+    if (!context.mounted) return false;
+
+    // StripeOnboardingScreen popt met `true` zodra charges_enabled = true.
+    // Vóór die tijd kan de gebruiker via back-button met null/false weggaan.
+    final stripeOk = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const StripeOnboardingScreen()),
+    );
+    if (stripeOk != true) {
+      // Eén extra DB-check: deep-link kan onboarding op de achtergrond hebben
+      // afgerond (account.updated webhook → charges_enabled = true) terwijl
+      // het scherm met pop(null) sloot. Liever 1 extra query dan gebruiker
+      // onterecht blokkeren.
+      try {
+        final recheck = await supabase
+            .from('profiles')
+            .select('stripe_charges_enabled')
+            .eq('id', userId)
+            .maybeSingle();
+        return (recheck?['stripe_charges_enabled'] as bool?) == true;
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+// ============================================
+// BtwVragenlijstScreen — verplichte 3-vragen-check vóór Stripe-onboarding.
+//
+// Stripe Connect Express wil straks zelf de IBAN, KvK-nummer en
+// identiteit verifiëren via z'n eigen hosted KYC. Maar Pluggo heeft de
+// `business_type` + `vat_status` velden nodig om straks de juiste
+// self-billing-factuur (KOR-template óf BTW-template) te genereren —
+// die invoice engine moet weten of de paaleigenaar BTW aftrekt of niet.
+//
+// We vragen daarom 3 dingen vooraf en slaan ze op in profiles. Bij
+// 'particulier' of geen-onderneming wordt vat_status automatisch 'none'
+// (geen optie tot KOR/BTW). Bij eenmanszaak/bv vragen we KvK-nummer
+// (8 cijfers, formaat-validatie) en BTW-status (KOR of plichtig).
+//
+// Dit scherm is reusable: ook later vanuit profielinstellingen openbaar
+// te maken als de paaleigenaar van rechtsvorm wisselt.
+// ============================================
+class BtwVragenlijstScreen extends StatefulWidget {
+  const BtwVragenlijstScreen({Key? key}) : super(key: key);
+
+  @override
+  State<BtwVragenlijstScreen> createState() => _BtwVragenlijstScreenState();
+}
+
+class _BtwVragenlijstScreenState extends State<BtwVragenlijstScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _kvkController = TextEditingController();
+
+  // De keuzes komen 1-op-1 overeen met de Postgres enums in migratie 0012.
+  // Niet aanpassen zonder ook de enum te migreren.
+  String? _businessType; // 'particulier' | 'eenmanszaak' | 'bv' | 'overig'
+  String? _vatStatus; // 'none' | 'kor' | 'btw_plichtig'
+
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExisting();
+  }
+
+  @override
+  void dispose() {
+    _kvkController.dispose();
+    super.dispose();
+  }
+
+  /// Laad bestaande waardes — zodat een eigenaar die later 'm opnieuw opent
+  /// (bv. vanuit instellingen) z'n eerdere keuze ziet en hoeft alleen het
+  /// gewijzigde veld aan te passen.
+  Future<void> _loadExisting() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      final row = await supabase
+          .from('profiles')
+          .select('business_type, vat_status, kvk_number')
+          .eq('id', userId)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() {
+        _businessType = row?['business_type'] as String?;
+        _vatStatus = row?['vat_status'] as String?;
+        final kvk = row?['kvk_number'] as String?;
+        if (kvk != null) _kvkController.text = kvk;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Helper: heeft de gekozen bedrijfsvorm een KvK-nummer nodig?
+  bool get _needsKvk =>
+      _businessType == 'eenmanszaak' || _businessType == 'bv';
+
+  /// Helper: kan de gebruiker tussen KOR en BTW-plichtig kiezen?
+  /// Particulieren zonder onderneming kunnen niet onder BTW vallen.
+  bool get _canChooseVat => _businessType != null && _businessType != 'particulier';
+
+  Future<void> _save() async {
+    if (_saving) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_businessType == null) {
+      _showError('Kies een bedrijfsvorm');
+      return;
+    }
+
+    // Auto-defaults voor vat_status: particulieren krijgen 'none',
+    // de rest moet expliciet kiezen.
+    final effectiveVatStatus = _businessType == 'particulier'
+        ? 'none'
+        : _vatStatus;
+    if (effectiveVatStatus == null) {
+      _showError('Kies of je KOR-ondernemer of BTW-plichtig bent');
+      return;
+    }
+
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      _showError('Niet ingelogd');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await supabase.from('profiles').update({
+        'business_type': _businessType,
+        'vat_status': effectiveVatStatus,
+        // KvK alleen opslaan als 'ie relevant is voor deze rechtsvorm,
+        // anders wissen (gebruiker kan terug naar particulier wisselen).
+        'kvk_number':
+            _needsKvk ? _kvkController.text.trim() : null,
+      }).eq('id', userId);
+
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      _showError('Opslaan mislukt: $e');
+      setState(() => _saving = false);
+    }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: AppColors.danger,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Voor we beginnen'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  children: [
+                    // ---------- Intro ----------
+                    Text(
+                      'Vertel ons even wat je situatie is',
+                      style: GoogleFonts.inter(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'We hebben dit nodig om straks de juiste factuur voor je '
+                      'verdiensten te maken. Stripe verifieert daarna apart je '
+                      'identiteit en bankrekening.',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ---------- Vraag 1: bedrijfsvorm ----------
+                    _SectionLabel('Wat is je situatie?'),
+                    _RadioTile(
+                      title: 'Particulier',
+                      subtitle: 'Ik heb geen onderneming',
+                      value: 'particulier',
+                      groupValue: _businessType,
+                      onChanged: (v) => setState(() {
+                        _businessType = v;
+                        if (v == 'particulier') _vatStatus = 'none';
+                      }),
+                    ),
+                    _RadioTile(
+                      title: 'ZZP / eenmanszaak',
+                      subtitle: 'Ik heb een KvK-inschrijving als eenmanszaak',
+                      value: 'eenmanszaak',
+                      groupValue: _businessType,
+                      onChanged: (v) => setState(() => _businessType = v),
+                    ),
+                    _RadioTile(
+                      title: 'BV',
+                      subtitle: 'Besloten vennootschap met KvK-inschrijving',
+                      value: 'bv',
+                      groupValue: _businessType,
+                      onChanged: (v) => setState(() => _businessType = v),
+                    ),
+                    _RadioTile(
+                      title: 'Anders',
+                      subtitle: 'VvE, stichting, vereniging, etc.',
+                      value: 'overig',
+                      groupValue: _businessType,
+                      onChanged: (v) => setState(() => _businessType = v),
+                    ),
+
+                    // ---------- Vraag 2: KvK (conditional) ----------
+                    if (_needsKvk) ...[
+                      const SizedBox(height: 24),
+                      _SectionLabel('KvK-nummer'),
+                      TextFormField(
+                        controller: _kvkController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 8,
+                        decoration: InputDecoration(
+                          hintText: '12345678',
+                          counterText: '',
+                          filled: true,
+                          fillColor: AppColors.surface,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        validator: (v) {
+                          if (!_needsKvk) return null;
+                          final cleaned = v?.trim() ?? '';
+                          if (cleaned.isEmpty) return 'KvK-nummer is verplicht';
+                          if (!RegExp(r'^\d{8}$').hasMatch(cleaned)) {
+                            return 'KvK-nummer is 8 cijfers';
+                          }
+                          return null;
+                        },
+                      ),
+                    ],
+
+                    // ---------- Vraag 3: BTW-status (conditional) ----------
+                    if (_canChooseVat) ...[
+                      const SizedBox(height: 24),
+                      _SectionLabel('Hoe zit het met BTW?'),
+                      _RadioTile(
+                        title: 'KOR-ondernemer',
+                        subtitle:
+                            'Ik val onder de Kleine Ondernemers Regeling '
+                            '(omzet onder €20.000 per jaar). Ik draag geen BTW af.',
+                        value: 'kor',
+                        groupValue: _vatStatus,
+                        onChanged: (v) => setState(() => _vatStatus = v),
+                      ),
+                      _RadioTile(
+                        title: 'BTW-plichtig',
+                        subtitle:
+                            'Ik draag zelf BTW af aan de Belastingdienst. '
+                            'Pluggo voegt 21% BTW toe aan je verdiensten.',
+                        value: 'btw_plichtig',
+                        groupValue: _vatStatus,
+                        onChanged: (v) => setState(() => _vatStatus = v),
+                      ),
+                    ],
+
+                    const SizedBox(height: 32),
+
+                    // ---------- Opslaan ----------
+                    SizedBox(
+                      height: 52,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          elevation: 0,
+                        ),
+                        onPressed: _saving ? null : _save,
+                        child: _saving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                'Opslaan en doorgaan',
+                                style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+/// Kleine helper-widget voor section labels boven inputs.
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text,
+        style: GoogleFonts.inter(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textPrimary,
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================
+// StripeOnboardingScreen — paaleigenaar wordt naar Stripe-hosted KYC gestuurd.
+//
+// Flow:
+//   1. Bij open: profiel ophalen (stripe_account_id + status-flags)
+//   2. Al verified? → success-state met "Doorgaan"-knop, pop(true)
+//   3. Nog niet? → "Start onboarding"-knop
+//      → roept StripeService.startOnboarding() aan (POST naar edge function)
+//      → krijgt onboarding_url terug (kortlevende Stripe-hosted URL)
+//      → opent URL via url_launcher externalApplication (Safari/Chrome)
+//   4. Gebruiker doorloopt Stripe-flow (KYC, bankrekening, identiteit)
+//      → Stripe redirect naar pluggo://onboarding/stripe-complete OF
+//        pluggo://onboarding/stripe-refresh (deep links in stap 5)
+//   5. Bij terugkeer in app (AppLifecycleState.resumed): profiel opnieuw
+//      ophalen — als webhook account.updated al binnen is, staat
+//      stripe_charges_enabled = true en zien we de success-state.
+//
+// Webhook-timing: account.updated kan ~5s nadat de gebruiker klikt op
+// "submit" bij Stripe binnenkomen. Daarom is er ook een handmatige
+// "Status verversen"-knop voor als de eerste auto-refresh nog te vroeg is.
+// ============================================
+class StripeOnboardingScreen extends StatefulWidget {
+  const StripeOnboardingScreen({Key? key}) : super(key: key);
+
+  @override
+  State<StripeOnboardingScreen> createState() => _StripeOnboardingScreenState();
+}
+
+class _StripeOnboardingScreenState extends State<StripeOnboardingScreen>
+    with WidgetsBindingObserver {
+  bool _loading = true;
+  bool _starting = false;
+
+  // Profiel-velden uit Supabase (zie 0013_stripe_payment_schema.sql)
+  String? _stripeAccountId;
+  String? _stripeAccountStatus; // 'pending' | 'review' | 'verified' | …
+  bool _chargesEnabled = false;
+  bool _payoutsEnabled = false;
+  bool _detailsSubmitted = false;
+  String? _disabledReason;
+  List<String> _currentlyDue = [];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Wanneer de gebruiker terugkomt uit een externe browser (Stripe-hosted
+  /// KYC voltooid), triggert iOS/Android een resume. We refreshen dan
+  /// automatisch de profiel-status. Geen polling — één refresh is genoeg
+  /// omdat onze deep links daarna ook nog een handmatige refresh kunnen
+  /// triggeren (stap 5).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _loadStatus();
+    }
+  }
+
+  Future<void> _loadStatus() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      final row = await supabase
+          .from('profiles')
+          .select(
+            'stripe_account_id, stripe_account_status, '
+            'stripe_charges_enabled, stripe_payouts_enabled, '
+            'stripe_details_submitted, stripe_disabled_reason, '
+            'stripe_currently_due',
+          )
+          .eq('id', userId)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() {
+        _stripeAccountId = row?['stripe_account_id'] as String?;
+        _stripeAccountStatus = row?['stripe_account_status'] as String?;
+        _chargesEnabled = (row?['stripe_charges_enabled'] as bool?) ?? false;
+        _payoutsEnabled = (row?['stripe_payouts_enabled'] as bool?) ?? false;
+        _detailsSubmitted = (row?['stripe_details_submitted'] as bool?) ?? false;
+        _disabledReason = row?['stripe_disabled_reason'] as String?;
+        final due = row?['stripe_currently_due'];
+        _currentlyDue = due is List
+            ? due.map((e) => e.toString()).toList()
+            : <String>[];
+        _loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Kon Stripe-status niet laden: $e'),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _startOnboarding() async {
+    if (_starting) return;
+    setState(() => _starting = true);
+    try {
+      final result = await StripeService.instance.startOnboarding();
+      if (!mounted) return;
+
+      // Open de Stripe-hosted KYC URL in een externe browser. We kiezen
+      // bewust externalApplication ipv inAppWebView omdat:
+      //   • Stripe's KYC flow Apple Pay / iCloud Keychain integratie
+      //     nodig kan hebben, dat werkt niet in een WKWebView.
+      //   • Stripe ondersteunt zelf de meeste auth-providers (banken,
+      //     iDIN) die WebViews blokkeren via X-Frame-Options.
+      //   • Bij voltooiing redirect Stripe naar onze deep link, die
+      //     iOS/Android terug naar de app brengt — geen WebView-pop nodig.
+      final uri = Uri.parse(result.onboardingUrl);
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        throw StripeServiceException('Kon Stripe-pagina niet openen');
+      }
+      // Wacht op return via lifecycle resume → _loadStatus() doet de rest.
+    } on StripeServiceException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Onbekende fout: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Status-mapping → 4 visuele states
+  //
+  //   1. notStarted   — geen stripe_account_id    → "Start onboarding"
+  //   2. inProgress   — account_id + !verified    → "Hervat onboarding"
+  //   3. actionNeeded — currently_due not empty   → "Los openstaande punten op"
+  //   4. verified     — charges_enabled = true    → "Doorgaan" (success)
+  // --------------------------------------------------------------------------
+  _OnboardingVisualState get _visualState {
+    if (_chargesEnabled) return _OnboardingVisualState.verified;
+    if (_stripeAccountId == null || _stripeAccountId!.isEmpty) {
+      return _OnboardingVisualState.notStarted;
+    }
+    if (_currentlyDue.isNotEmpty || _disabledReason != null) {
+      return _OnboardingVisualState.actionNeeded;
+    }
+    return _OnboardingVisualState.inProgress;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Uitbetalingen via Stripe'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Status verversen',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _loading ? null : _loadStatus,
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                children: [
+                  _statusCard(),
+                  const SizedBox(height: 20),
+                  _infoCard(),
+                  const SizedBox(height: 24),
+                  _primaryButton(),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _statusCard() {
+    late final Color bg;
+    late final Color fg;
+    late final IconData icon;
+    late final String title;
+    late final String body;
+
+    switch (_visualState) {
+      case _OnboardingVisualState.verified:
+        bg = AppColors.primarySoft;
+        fg = AppColors.primaryDark;
+        icon = Icons.check_circle_rounded;
+        title = 'Geverifieerd';
+        body =
+            'Stripe heeft je gegevens goedgekeurd. Je kunt nu betalingen '
+            'ontvangen. Uitbetalingen gaan automatisch.';
+        break;
+      case _OnboardingVisualState.actionNeeded:
+        bg = AppColors.warningSoft;
+        fg = AppColors.warningDark;
+        icon = Icons.warning_amber_rounded;
+        title = 'Actie vereist';
+        body = _disabledReason != null
+            ? 'Stripe vraagt extra gegevens: ${_friendlyDisabledReason(_disabledReason!)}'
+            : 'Stripe heeft nog wat informatie nodig om je account te '
+                  'verifiëren. Klik hieronder om de ontbrekende gegevens '
+                  'aan te vullen.';
+        break;
+      case _OnboardingVisualState.inProgress:
+        bg = AppColors.solarSoft;
+        fg = const Color(0xFF8A5300);
+        icon = Icons.hourglass_top_rounded;
+        title = 'In behandeling';
+        body =
+            'Je hebt je gegevens ingediend. Stripe verifieert ze meestal '
+            'binnen enkele minuten. Soms duurt het tot een werkdag bij '
+            'aanvullende identiteits-checks.';
+        break;
+      case _OnboardingVisualState.notStarted:
+        bg = AppColors.primarySoft;
+        fg = AppColors.primaryDark;
+        icon = Icons.account_balance_rounded;
+        title = 'Nog niet gestart';
+        body =
+            'Om betalingen te ontvangen, koppel je Pluggo aan Stripe. '
+            'Je doorloopt eenmalig een korte verificatie op Stripe.com.';
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: fg, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: fg,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  body,
+                  style: GoogleFonts.inter(
+                    fontSize: 13.5,
+                    color: fg,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Wat ga je doen?',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _bullet('Identiteit verifiëren (paspoort of ID-kaart)'),
+          _bullet('Bankrekening koppelen (IBAN)'),
+          _bullet('Adres bevestigen'),
+          const SizedBox(height: 8),
+          Text(
+            'Stripe vraagt deze info omdat ze als betaaldienst onder Europese '
+            'wetgeving (PSD2) moeten weten wie je bent. Je gegevens blijven '
+            'bij Stripe — Pluggo ziet ze niet.',
+            style: GoogleFonts.inter(
+              fontSize: 12.5,
+              color: AppColors.textSecondary,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bullet(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Container(
+              width: 4,
+              height: 4,
+              decoration: const BoxDecoration(
+                color: AppColors.textSecondary,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.inter(
+                fontSize: 13.5,
+                color: AppColors.textPrimary,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _primaryButton() {
+    late final String label;
+    late final VoidCallback? onPressed;
+    late final IconData icon;
+
+    switch (_visualState) {
+      case _OnboardingVisualState.verified:
+        label = 'Doorgaan';
+        icon = Icons.arrow_forward_rounded;
+        onPressed = () => Navigator.pop(context, true);
+        break;
+      case _OnboardingVisualState.actionNeeded:
+        label = 'Openstaande punten oplossen';
+        icon = Icons.open_in_new_rounded;
+        onPressed = _starting ? null : _startOnboarding;
+        break;
+      case _OnboardingVisualState.inProgress:
+        // Je hebt KYC al ingediend, Stripe verifieert nog. Primaire actie =
+        // status hertesten (webhook kan elk moment binnenkomen). "Hervat
+        // onboarding" zou misleidend zijn — er valt niets te hervatten, en
+        // klikken stuurt je naar Stripe's summary-scherm waar je alleen je
+        // gegevens opnieuw kunt bekijken. Voor de zeldzame gevallen dat je
+        // tóch terug naar Stripe wilt (bv. ander IBAN invoeren) is er een
+        // secundaire tekstlink onder de hoofdknop.
+        label = 'Status verversen';
+        icon = Icons.refresh_rounded;
+        onPressed = _loading ? null : _loadStatus;
+        break;
+      case _OnboardingVisualState.notStarted:
+        label = 'Start onboarding op Stripe';
+        icon = Icons.open_in_new_rounded;
+        onPressed = _starting ? null : _startOnboarding;
+        break;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 52,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              elevation: 0,
+            ),
+            onPressed: onPressed,
+            icon: _starting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Icon(icon, size: 20),
+            label: Text(
+              _starting ? 'Bezig met laden…' : label,
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+        // Secundaire escape-hatch alleen tonen tijdens "In behandeling": als
+        // paaleigenaar tóch terug naar Stripe wil (ander IBAN, andere ID).
+        // Niet de primaire actie omdat 99% van de gebruikers gewoon moet
+        // wachten op de webhook.
+        if (_visualState == _OnboardingVisualState.inProgress) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _starting ? null : _startOnboarding,
+            child: Text(
+              'Gegevens aanpassen in Stripe',
+              style: GoogleFonts.inter(
+                fontSize: 13.5,
+                color: AppColors.textSecondary,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Vertaal Stripe's English `disabled_reason` strings naar iets dat
+  /// een paaleigenaar begrijpt. Niet exhaustief — onbekende reasons
+  /// vallen terug op de raw string.
+  String _friendlyDisabledReason(String reason) {
+    switch (reason) {
+      case 'requirements.past_due':
+        return 'Er staan verplichte velden open die de deadline hebben '
+            'gepasseerd. Vul ze nu in om uitbetalingen te hervatten.';
+      case 'requirements.pending_verification':
+        return 'Stripe is je gegevens aan het controleren. Dit duurt '
+            'meestal een werkdag.';
+      case 'rejected.fraud':
+      case 'rejected.terms_of_service':
+      case 'rejected.listed':
+      case 'rejected.other':
+        return 'Stripe heeft je account geweigerd. Neem contact op met '
+            'support@pluggoapp.nl voor hulp.';
+      case 'listed':
+        return 'Stripe controleert je gegevens tegen sanctielijsten.';
+      case 'under_review':
+        return 'Je account staat onder review bij Stripe.';
+      default:
+        return reason; // raw string voor onbekende codes
+    }
+  }
+}
+
+enum _OnboardingVisualState { notStarted, inProgress, actionNeeded, verified }
+
+/// Radio-tile in card-stijl, past beter bij Pluggo's look dan de
+/// default Material RadioListTile.
+class _RadioTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String value;
+  final String? groupValue;
+  final ValueChanged<String?> onChanged;
+
+  const _RadioTile({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.groupValue,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = value == groupValue;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => onChanged(value),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? AppColors.primary : Colors.transparent,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_off_rounded,
+                  color: selected ? AppColors.primary : AppColors.textSecondary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        color: AppColors.textSecondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AddChargerScreen extends StatefulWidget {
@@ -3192,11 +4961,55 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Laadpaal toegevoegd! 🎉'),
+          content: Text('Paal toegevoegd! Stel nu de beschikbaarheid in.'),
           backgroundColor: AppColors.primary,
         ),
       );
-      Navigator.pop(context, true); // true = nieuw item toegevoegd
+
+      // "Eerste echt event" voor eigenaren: ze willen weten wanneer er een
+      // boeking binnenkomt. Vraag nu om push-permissie (alleen de eerste
+      // keer is er een dialoog; daarna no-op). Fire-and-forget.
+      // ignore: unawaited_futures
+      PluggoPush.instance.requestPermissionAndRegister();
+
+      // Bouw een Charger-object van de zojuist ingevoegde rij. We hebben
+      // .select().single() op de insert gedaan, dus `inserted` bevat alle
+      // velden — alleen photo_urls zit daar nog niet in als de upload pas
+      // daarna gebeurde, dus die patchen we manueel.
+      final freshRow = Map<String, dynamic>.from(inserted);
+      if (_pickedPhotos.isNotEmpty) {
+        // Lazy: refetch zodat photo_urls erin zit. Niet kritiek voor
+        // AvailabilityScreen, die gebruikt alleen charger.id, maar netjes
+        // is netjes — dan klopt 't object als er ooit meer mee gedaan wordt.
+        try {
+          final refetched = await supabase
+              .from('chargers')
+              .select()
+              .eq('id', chargerId)
+              .single();
+          freshRow.addAll(refetched);
+        } catch (_) {
+          // Niet-fataal — fallback op de oorspronkelijke rij.
+        }
+      }
+      // Owner heeft net z'n eigen paal aangemaakt — exacte locatie hoort
+      // er bij. (Wordt direct doorgepushed naar AvailabilityScreen, niet
+      // de publieke detail.)
+      final newCharger = Charger.fromMap(freshRow, isExactLocation: true);
+
+      if (!mounted) return;
+      // pushReplacement: na opslaan in AvailabilityScreen pop't 'ie met `true`
+      // door naar de oorspronkelijke aanroeper (Mijn palen / Home), die
+      // dan z'n lijst verversen. AddChargerScreen verdwijnt dus uit de stack.
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => AvailabilityScreen(
+            charger: newCharger,
+            isInitialSetup: true,
+          ),
+        ),
+      );
+      return;
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -3232,7 +5045,14 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        // Bottom-padding incl. system inset zodat de submit-knop niet onder de
+        // Android gesture/nav-bar valt (edge-to-edge, Android 15+).
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(context).viewPadding.bottom,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -3291,7 +5111,9 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
               controller: _priceController,
               hint: 'bijv. 0,35',
               icon: Icons.euro,
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
             ),
             priceFeedback(_priceController),
             const SizedBox(height: 20),
@@ -3856,7 +5678,20 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
         update['lng'] = newCoords.longitude;
       }
 
-      await supabase.from('chargers').update(update).eq('id', chargerId);
+      // .select() forceert dat de update een rij teruggeeft. Zonder .select()
+      // returnt een RLS-rejected update succesvol met 0 rijen — silent fail.
+      // Door .select() toe te voegen kunnen we expliciet checken én throwen.
+      final updated = await supabase
+          .from('chargers')
+          .update(update)
+          .eq('id', chargerId)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Wijzigingen werden geweigerd (0 rijen aangepast). '
+          'Mogelijk ben je niet meer eigenaar van deze paal.',
+        );
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3993,7 +5828,14 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        // Bottom-padding incl. system inset zodat de submit-knop niet onder de
+        // Android gesture/nav-bar valt (edge-to-edge, Android 15+).
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(context).viewPadding.bottom,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -4016,7 +5858,9 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
               controller: _priceController,
               hint: 'bijv. 0,35',
               icon: Icons.euro,
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
             ),
             priceFeedback(_priceController),
             const SizedBox(height: 20),
@@ -4431,6 +6275,12 @@ class _DetailScreenState extends State<DetailScreen> {
   // voor deze paal? Zo ja: instructies zijn zichtbaar.
   bool _hasActiveBooking = false;
 
+  // Heeft de huidige gebruiker een door de eigenaar BEVESTIGDE boeking?
+  // Strenger dan _hasActiveBooking (die ook pending telt). Pas bij confirmed
+  // krijgt de boeker de exacte locatie te zien — anders blijft het fuzzy
+  // adres + fuzzy lat/lng staan. Zie migratie 0010.
+  bool _hasConfirmedBooking = false;
+
   @override
   void initState() {
     super.initState();
@@ -4438,6 +6288,12 @@ class _DetailScreenState extends State<DetailScreen> {
     _loadSlots();
     _checkBooking();
     _loadReviews();
+    // Komt de gebruiker via de publieke kaart binnen op z'n eigen paal,
+    // dan is widget.charger fuzzy. Owner → direct exact ophalen.
+    // Voor confirmed bookers regelt _checkBooking de swap.
+    if (_isOwner && !charger.isExactLocation) {
+      _refreshCharger();
+    }
   }
 
   Future<void> _loadReviews() async {
@@ -4478,30 +6334,42 @@ class _DetailScreenState extends State<DetailScreen> {
     try {
       final data = await supabase
           .from('bookings')
-          .select('id')
+          .select('id, status')
           .eq('charger_id', charger.id)
           .eq('user_id', userId)
-          .not('status', 'in', '(cancelled,rejected)')
-          .limit(1);
+          .not('status', 'in', '(cancelled,rejected)');
       if (!mounted) return;
+      final rows = (data as List).cast<Map<String, dynamic>>();
+      final hasActive = rows.isNotEmpty;
+      final hasConfirmed = rows.any((r) => r['status'] == 'confirmed');
       setState(() {
-        _hasActiveBooking = (data as List).isNotEmpty;
+        _hasActiveBooking = hasActive;
+        _hasConfirmedBooking = hasConfirmed;
       });
+      // Als we net hebben vastgesteld dat er een confirmed booking is en
+      // we toonden tot nu toe fuzzy data, swap naar exact via een refresh.
+      if (hasConfirmed && !charger.isExactLocation) {
+        await _refreshCharger();
+      }
     } catch (_) {
       // Bij fout houden we 'm gewoon op false
     }
   }
 
   Future<void> _refreshCharger() async {
+    // Owners en confirmed bookers mogen de exacte locatie zien; iedereen
+    // anders blijft op de fuzzy view. Zie migratie 0010 voor de server-
+    // kant. RLS volgt — voor nu is dit een app-side guard.
+    final mayShowExact = _isOwner || _hasConfirmedBooking;
     try {
       final data = await supabase
-          .from('chargers')
+          .from(mayShowExact ? 'chargers' : 'chargers_public')
           .select()
           .eq('id', charger.id)
           .maybeSingle();
       if (data == null || !mounted) return;
       setState(() {
-        charger = Charger.fromMap(data);
+        charger = Charger.fromMap(data, isExactLocation: mayShowExact);
       });
     } catch (_) {
       // Stil falen; we gebruiken de cached versie
@@ -4690,7 +6558,15 @@ class _DetailScreenState extends State<DetailScreen> {
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        // Bottom padding extra opgehoogd met de system inset (Android gesture
+        // bar / 3-button nav). Zonder dit valt de "Boekingen open vanaf"-knop
+        // gedeeltelijk achter de nav-bar in edge-to-edge mode (Android 15+).
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(context).viewPadding.bottom,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -4742,61 +6618,104 @@ class _DetailScreenState extends State<DetailScreen> {
                               charger.address,
                               style: const TextStyle(fontSize: 14, color: Colors.grey),
                             ),
+                            // Wanneer we (nog) niet de exacte locatie tonen,
+                            // even uitleggen waarom de paal op de kaart ~100m
+                            // verschoven staat en het huisnummer ontbreekt.
+                            if (!charger.isExactLocation) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.lock_outline_rounded,
+                                    size: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      'Exact adres verschijnt na bevestigde boeking',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
                       // Compacte "Route"-knop rechts van het adres.
                       // Opent een bottom sheet met Apple Maps / Google Maps / kopiëren.
-                      const SizedBox(width: 8),
-                      Material(
-                        color: AppColors.primarySoft,
-                        borderRadius: BorderRadius.circular(12),
-                        child: InkWell(
+                      // Alleen tonen als we de exacte locatie kennen — anders
+                      // zou de knop naar een fuzzy punt 100-200m verderop sturen.
+                      if (charger.isExactLocation) ...[
+                        const SizedBox(width: 8),
+                        Material(
+                          color: AppColors.primarySoft,
                           borderRadius: BorderRadius.circular(12),
-                          onTap: _openInMaps,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.navigation_rounded,
-                                  size: 18,
-                                  color: AppColors.primary,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Route',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: _openInMaps,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.navigation_rounded,
+                                    size: 18,
                                     color: AppColors.primary,
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Route',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 16),
-                  if (charger.solar)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.solarSoft,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        '☀️ Stroom van zonnepanelen',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFFF9A825),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                  // Tag-rij: zonne-energie + Pionier-badge. Wrap zodat ze
+                  // bij smalle schermen netjes onder elkaar gaan.
+                  if (charger.solar || charger.ownerIsPioneer)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        if (charger.solar)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: AppColors.solarSoft,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              '☀️ Stroom van zonnepanelen',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFFF9A825),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        if (charger.ownerIsPioneer)
+                          const PioneerBadge(
+                              size: PioneerBadgeSize.medium),
+                      ],
                     ),
                 ],
               ),
@@ -4807,8 +6726,12 @@ class _DetailScreenState extends State<DetailScreen> {
                 Expanded(
                   child: _InfoTile(
                     icon: Icons.bolt,
-                    label: 'Prijs',
-                    value: '€${charger.price}/kWh',
+                    // Owner ziet zijn eigen instelprijs; booker ziet de
+                    // prijs incl. €0,03 servicefee — dat is wat 'ie betaalt.
+                    label: _isOwner ? 'Jouw prijs' : 'Prijs',
+                    value: _isOwner
+                        ? '€${charger.price}/kWh'
+                        : formatBookerPricePerKwhLabel(charger.price),
                     color: AppColors.primary,
                   ),
                 ),
@@ -5286,10 +7209,19 @@ class _DetailScreenState extends State<DetailScreen> {
     if (text == null || text.isEmpty) return;
 
     try {
-      await supabase.from('reviews').update({
-        'owner_reply': text,
-        'owner_replied_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', review.id);
+      final updated = await supabase
+          .from('reviews')
+          .update({
+            'owner_reply': text,
+            'owner_replied_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', review.id)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Reactie werd geweigerd. Mogelijk ben je niet meer eigenaar.',
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -5768,7 +7700,17 @@ class _FullscreenPhotoView extends StatelessWidget {
 // ============================================
 class AvailabilityScreen extends StatefulWidget {
   final Charger charger;
-  const AvailabilityScreen({Key? key, required this.charger}) : super(key: key);
+  /// True wanneer dit scherm direct na het toevoegen van een nieuwe paal
+  /// wordt geopend. Past de UI aan (andere titel, andere knop-tekst,
+  /// expliciete waarschuwing dat de paal anders onzichtbaar blijft) en
+  /// pop't bij opslaan met `true` zodat de aanroeper zijn lijst kan
+  /// verversen — dezelfde return value als AddChargerScreen voorheen gaf.
+  final bool isInitialSetup;
+  const AvailabilityScreen({
+    Key? key,
+    required this.charger,
+    this.isInitialSetup = false,
+  }) : super(key: key);
 
   @override
   State<AvailabilityScreen> createState() => _AvailabilityScreenState();
@@ -5854,13 +7796,19 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Beschikbaarheid opgeslagen!'),
+        SnackBar(
+          content: Text(
+            widget.isInitialSetup
+                ? 'Top — je paal staat nu open op de gekozen tijden!'
+                : 'Beschikbaarheid opgeslagen!',
+          ),
           backgroundColor: AppColors.primary,
           behavior: SnackBarBehavior.floating,
         ),
       );
-      Navigator.pop(context);
+      // Bij initial-setup pop'en we met `true` zodat de Mijn-palen lijst
+      // (die de oorspronkelijke push deed) z'n lijst kan verversen.
+      Navigator.pop(context, widget.isInitialSetup ? true : null);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -5911,14 +7859,36 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isSetup = widget.isInitialSetup;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text('Beschikbaarheid'),
+        // Bij initial-setup laten we de back-arrow weg om te voorkomen dat
+        // de eigenaar 'm wegklikt en denkt dat z'n paal vindbaar is. In
+        // plaats daarvan een 'Later' tekstknop rechts die expliciet pop't
+        // met true (paal is wel opgeslagen, alleen geen slots) zodat de
+        // lijst sowieso refresht. Daar tonen we dan een waarschuwing.
+        leading: isSetup
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () => Navigator.pop(context),
+              ),
+        automaticallyImplyLeading: !isSetup,
+        title: Text(isSetup ? 'Wanneer is je paal open?' : 'Beschikbaarheid'),
+        actions: [
+          if (isSetup)
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(
+                'Later',
+                style: GoogleFonts.inter(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
       ),
       body: _loading
           ? const Center(
@@ -5929,29 +7899,42 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
             )
           : Column(
               children: [
-                // Uitleg-banner
+                // Uitleg-banner — bij initial-setup expliciete waarschuwing
+                // dat zonder dagen de paal niet vindbaar is in de zoekresultaten.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
+                      color: isSetup
+                          ? AppColors.warningSoft
+                          : AppColors.primarySoft,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(
-                          Icons.info_outline_rounded,
-                          color: AppColors.primary,
+                        Icon(
+                          isSetup
+                              ? Icons.lightbulb_outline_rounded
+                              : Icons.info_outline_rounded,
+                          color: isSetup
+                              ? AppColors.warning
+                              : AppColors.primary,
                           size: 20,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Stel in op welke dagen en tijden buren mogen laden.',
+                            isSetup
+                                ? 'Bijna klaar! Zet hieronder de dagen aan waarop buren mogen laden. '
+                                    'Zonder beschikbaarheid blijft je paal onzichtbaar in de app.'
+                                : 'Stel in op welke dagen en tijden buren mogen laden.',
                             style: GoogleFonts.inter(
                               fontSize: 13,
-                              color: AppColors.primaryDark,
+                              color: isSetup
+                                  ? AppColors.warningDark
+                                  : AppColors.primaryDark,
                             ),
                           ),
                         ),
@@ -5969,26 +7952,61 @@ class _AvailabilityScreenState extends State<AvailabilityScreen> {
                     },
                   ),
                 ),
-                // Save-knop onderaan met veilige afstand
+                // Save-knop onderaan met veilige afstand. Bij initial-setup
+                // tonen we eronder een tweede, secundaire knop "Doe ik later"
+                // — anders blijven mensen die nog geen agenda paraat hebben
+                // hangen op dit scherm zonder duidelijke uitweg. De paal staat
+                // dan al wel in hun lijst (met een waarschuwingschip dat 'ie
+                // nog niet boekbaar is) zodat het niet verdwijnt uit beeld.
                 SafeArea(
                   top: false,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _saving ? null : _save,
-                        child: _saving
-                            ? const SizedBox(
-                                height: 22,
-                                width: 22,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.5,
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _saving ? null : _save,
+                            child: _saving
+                                ? const SizedBox(
+                                    height: 22,
+                                    width: 22,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2.5,
+                                    ),
+                                  )
+                                : Text(
+                                    isSetup
+                                        ? 'Klaar — paal activeren'
+                                        : 'Opslaan',
+                                  ),
+                          ),
+                        ),
+                        if (isSetup) ...[
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextButton(
+                              onPressed: _saving
+                                  ? null
+                                  : () => Navigator.pop(context, true),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.textSecondary,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              child: Text(
+                                'Doe ik later — naar mijn palen',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                              )
-                            : const Text('Opslaan'),
-                      ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -6287,6 +8305,49 @@ class _BookingScreenState extends State<BookingScreen> {
               ? user.userMetadata!['full_name'] as String
               : (user.email ?? 'Onbekend');
 
+      // -----------------------------------------------------------------
+      // Account-pauze check: heeft deze boeker een betaalverzoek dat
+      // langer dan `maxDaysOutstandingPayment` dagen openstaat?
+      // Zo ja: nieuwe boeking weigeren tot openstaande factuur betaald is.
+      // (Mitigeer-optie van het pay-after-charge model.)
+      // -----------------------------------------------------------------
+      final cutoff = DateTime.now()
+          .toUtc()
+          .subtract(Duration(days: maxDaysOutstandingPayment));
+      final outstanding = await supabase
+          .from('bookings')
+          .select('id, payment_requested_at')
+          .eq('user_id', userId)
+          .not('payment_status', 'eq', 'paid')
+          .not('payment_status', 'eq', 'refunded')
+          .not('payment_requested_at', 'is', null)
+          .lt('payment_requested_at', cutoff.toIso8601String())
+          .limit(1);
+
+      if ((outstanding as List).isNotEmpty) {
+        if (!mounted) return;
+        setState(() => _submitting = false);
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Openstaande betaling'),
+            content: Text(
+              'Je hebt een betaalverzoek dat al langer dan '
+              '$maxDaysOutstandingPayment dagen openstaat. '
+              'Rond die betaling eerst af in "Mijn boekingen" '
+              'voordat je een nieuwe paal boekt.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Begrepen'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       await supabase.from('bookings').insert({
         'charger_id': widget.charger.id,
         'user_id': userId,
@@ -6300,6 +8361,29 @@ class _BookingScreenState extends State<BookingScreen> {
             ? null
             : _messageController.text.trim(),
       });
+
+      // "Eerste echt event": de boeker heeft net een aanvraag gedaan en wil
+      // weten wanneer de eigenaar accepteert. Vraag nu om push-permissie
+      // (iOS toont z'n systeem-dialoog alleen de eerste keer; daarna is
+      // dit een no-op). Fire-and-forget: mag de UI niet blokkeren.
+      // ignore: unawaited_futures
+      PluggoPush.instance.requestPermissionAndRegister();
+
+      // Push naar de eigenaar — die wil meteen weten dat er een aanvraag is.
+      // Fire-and-forget. Owner_id is altijd gezet in onze data; mocht 'ie ooit
+      // null zijn (oude rij?) dan slaan we de push gewoon over.
+      if (widget.charger.ownerId != null) {
+        // ignore: unawaited_futures
+        PluggoPush.sendTo(
+          userId: widget.charger.ownerId!,
+          title: 'Nieuwe boekingsaanvraag',
+          body: '$userName wil ${widget.charger.name} reserveren',
+          data: {
+            'type': 'booking_request',
+            'charger_id': widget.charger.id,
+          },
+        );
+      }
 
       // Stuur de eigenaar een mail dat er een nieuwe aanvraag is.
       // Fire-and-forget: faalt stilletjes als er geen owner_email is.
@@ -6422,8 +8506,10 @@ class _BookingScreenState extends State<BookingScreen> {
           'html': html,
         },
       );
-    } catch (_) {
-      // best-effort
+    } catch (e, st) {
+      // Fire-and-forget, maar wel loggen zodat we silent failures kunnen
+      // debuggen (bv. ontbrekende Resend secret, ongeldig domein, etc.)
+      debugPrint('send-email (owner new booking) failed: $e\n$st');
     }
   }
 
@@ -6439,11 +8525,23 @@ class _BookingScreenState extends State<BookingScreen> {
         title: const Text('Reserveer laadpaal'),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        // Bottom-padding incl. system inset zodat de "Bevestig reservering"-knop
+        // niet onder de Android gesture/nav-bar valt (edge-to-edge, Android 15+).
+        padding: EdgeInsets.fromLTRB(
+          16,
+          8,
+          16,
+          24 + MediaQuery.of(context).viewPadding.bottom,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _chargerSummaryCard(),
+            const SizedBox(height: 12),
+            // Prijs-info kaart: laat zien wat de boeker per kWh betaalt
+            // én vermeldt expliciet de €0,40 mini-sessie fee zodat dat niet
+            // pas bij de Stripe PaymentSheet zichtbaar wordt.
+            _pricingInfoCard(),
             const SizedBox(height: 22),
             Text(
               'Kies een dag',
@@ -6582,8 +8680,9 @@ class _BookingScreenState extends State<BookingScreen> {
               ],
             ),
           ),
+          // Booker-facing — toon de all-in prijs (paalprijs + €0,03 servicefee).
           Text(
-            '€${widget.charger.price}',
+            '€${bookerPricePerKwh(widget.charger.price).toStringAsFixed(2).replaceAll('.', ',')}',
             style: GoogleFonts.inter(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -6592,6 +8691,126 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Prijs-info kaartje. Maakt voor de boeker — vóór de boeking bevestigd
+  /// wordt — duidelijk wat-ie per kWh betaalt en dat er bij sessies onder
+  /// [smallSessionThresholdKwh] een eenmalige €${smallSessionFeeEur} fee
+  /// bovenop komt. Voorkomt dat dit pas in de Stripe PaymentSheet opduikt.
+  Widget _pricingInfoCard() {
+    final allInPerKwh = bookerPricePerKwh(widget.charger.price);
+    final allInStr =
+        allInPerKwh.toStringAsFixed(2).replaceAll('.', ',');
+    final feeStr =
+        smallSessionFeeEur.toStringAsFixed(2).replaceAll('.', ',');
+    final thresholdStr = smallSessionThresholdKwh % 1 == 0
+        ? smallSessionThresholdKwh.toStringAsFixed(0)
+        : smallSessionThresholdKwh.toStringAsFixed(1).replaceAll('.', ',');
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.primarySoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.receipt_long_rounded,
+                color: AppColors.primary,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Wat ga je betalen?',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primaryDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _pricingRow(
+            label: 'Tarief',
+            value: '€$allInStr per kWh',
+            sub: 'incl. €0,03 servicefee van Pluggo',
+          ),
+          const SizedBox(height: 6),
+          _pricingRow(
+            label: 'Mini-sessie fee',
+            value: '€$feeStr',
+            sub: 'eenmalig bij sessies onder $thresholdStr kWh '
+                '— dekt de iDEAL-kosten',
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Je betaalt achteraf in de app (iDEAL, Apple Pay, Google Pay '
+            'of kaart) op basis van de werkelijk geladen kWh die de '
+            'eigenaar invult.',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pricingRow({
+    required String label,
+    required String value,
+    String? sub,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              if (sub != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  sub,
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          value,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ],
     );
   }
 
@@ -6908,6 +9127,10 @@ class MyChargersScreen extends StatefulWidget {
 class _MyChargersScreenState extends State<MyChargersScreen> {
   bool _loading = true;
   List<Charger> _chargers = [];
+  /// Charger-id's waarvoor minstens één availability_slot bestaat. Palen
+  /// die hier NIET in zitten zijn effectief onzichtbaar voor boekers
+  /// (geen openingstijden) — daar tonen we een waarschuwingschip.
+  Set<String> _chargersWithSlots = {};
 
   @override
   void initState() {
@@ -6928,12 +9151,39 @@ class _MyChargersScreenState extends State<MyChargersScreen> {
           .select()
           .eq('owner_id', userId)
           .order('created_at', ascending: false);
+      // Mijn palen — owner ziet altijd exacte locatie.
       final list = (data as List)
-          .map((m) => Charger.fromMap(m as Map<String, dynamic>))
+          .map((m) => Charger.fromMap(
+                m as Map<String, dynamic>,
+                isExactLocation: true,
+              ))
           .toList();
+
+      // In één keer alle slots ophalen voor deze charger-ids; dan kunnen
+      // we per tile zien of er minstens één slot bestaat. Dit is een
+      // bewuste tweede query — een join via PostgREST kan ook, maar dit is
+      // simpeler en de payload is verwaarloosbaar (alleen charger_id).
+      final ids = list.map((c) => c.id).toList();
+      Set<String> withSlots = {};
+      if (ids.isNotEmpty) {
+        try {
+          final slotRows = await supabase
+              .from('availability_slots')
+              .select('charger_id')
+              .inFilter('charger_id', ids);
+          withSlots = (slotRows as List)
+              .map((r) => (r as Map<String, dynamic>)['charger_id'] as String)
+              .toSet();
+        } catch (_) {
+          // Niet-fataal — als de slots-query faalt tonen we gewoon geen
+          // chip (oude gedrag). De palen-lijst zelf werkt nog wel.
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _chargers = list;
+        _chargersWithSlots = withSlots;
         _loading = false;
       });
     } catch (e) {
@@ -6959,8 +9209,8 @@ class _MyChargersScreenState extends State<MyChargersScreen> {
   }
 
   Future<void> _openAdd() async {
-    // IBAN-gate: zie AddChargerScreen-flow op home — zonder IBAN geen paal.
-    final ok = await ensureIbanOrPrompt(context);
+    // Stripe-gate: zie home-flow voor uitleg (BTW-vragenlijst + Stripe KYC).
+    final ok = await ensureStripeReadyOrPrompt(context);
     if (!ok) return;
     final added = await Navigator.push<bool>(
       context,
@@ -6970,12 +9220,18 @@ class _MyChargersScreenState extends State<MyChargersScreen> {
   }
 
   Widget _chargerTile(Charger c) {
+    final needsAvailability = !_chargersWithSlots.contains(c.id);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: softShadow,
+        // Subtiele oranje rand als de paal nog niet boekbaar is — zo valt
+        // 'ie op zonder dat de hele tile schreeuwt.
+        border: needsAvailability
+            ? Border.all(color: AppColors.warning.withOpacity(0.5), width: 1)
+            : null,
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -7089,6 +9345,46 @@ class _MyChargersScreenState extends State<MyChargersScreen> {
                         ],
                       ],
                     ),
+                    // Waarschuwingschip onder de status-chips wanneer de paal
+                    // geen openingstijden heeft. De paal lijkt anders 'open'
+                    // (kolom available=true) terwijl boekers geen slot kunnen
+                    // kiezen — dit voorkomt die misleiding.
+                    if (needsAvailability) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.warningSoft,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.error_outline_rounded,
+                              size: 12,
+                              color: AppColors.warningDark,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                'Stel beschikbaarheid in — paal is nog onzichtbaar',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.warningDark,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -7228,8 +9524,8 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   void initState() {
     super.initState();
     // Luister naar lifecycle: als de app van background terugkeert (bijv.
-    // na een Mollie checkout in Safari), refreshen we de boekingen zodat
-    // payment_status meteen up-to-date is.
+    // na een betaling waarbij iDEAL kort naar de bank-app schakelde),
+    // refreshen we de boekingen zodat payment_status meteen up-to-date is.
     WidgetsBinding.instance.addObserver(this);
     _load();
   }
@@ -7306,10 +9602,17 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     if (confirmed != true) return;
 
     try {
-      await supabase
+      final updated = await supabase
           .from('bookings')
           .update({'status': 'cancelled'})
-          .eq('id', booking.id);
+          .eq('id', booking.id)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Annulering werd geweigerd (0 rijen aangepast). '
+          'Mogelijk is de boeking ondertussen al gewijzigd.',
+        );
+      }
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -7324,18 +9627,67 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // ----------------------------------------------------------------
-  // Boeking afrekenen via Mollie. Roept de `create-payment` edge
-  // function aan, die een Mollie checkout-sessie opent en de URL
-  // teruggeeft. Daarna openen we die URL in de externe browser
-  // (zodat iDEAL native bank-apps geopend kunnen worden).
+  // Boeking afrekenen via Stripe Connect — **Pad 2: Stripe Checkout**.
+  //
+  // Achtergrond: na 3 dagen vastlopen op een silent hang in flutter_stripe
+  // 11.5.0 PaymentSheet (iOS 26.3.1 + FlutterSceneDelegate: presenting
+  // view controller onvindbaar, sheet rendert onzichtbaar) zijn we
+  // gepivoteerd naar Stripe-hosted Checkout via Safari.
+  //
+  // Flow:
+  //   1. Bevestigingsdialog met breakdown (zelfde UX als voorheen).
+  //   2. StripeService.createCheckoutSession → edge function
+  //      'create-payment-stripe' valideert booking + owner.charges_enabled
+  //      en maakt een Checkout Session aan met destination charge
+  //      (payment_intent_data[application_fee_amount] + transfer_data).
+  //   3. launchUrl(checkout_url, externalApplication) → opent Safari met
+  //      checkout.stripe.com. Daar kiest gebruiker iDEAL/kaart/Apple Pay.
+  //   4. Na betaling redirect Stripe naar stripe-checkout-return edge
+  //      function → JS opent pluggo://stripe-return → gebruiker is terug
+  //      in de app. (Werkt ook zonder deeplink — gebruiker kan handmatig
+  //      terugswipen.)
+  //   5. Ondertussen toont de app een "Wachten op betaling..." dialog en
+  //      pollt elke 3s booking.payment_status (max 5 min). Webhook
+  //      'checkout.session.completed' / 'payment_intent.succeeded' update
+  //      de booking server-side; polling pikt dat op en sluit de dialog.
+  //   6. Bij paid: success snackbar + _load() refresh. Bij timeout:
+  //      vriendelijke "controleer je bookings later" snackbar.
   // ----------------------------------------------------------------
   bool _processingPayment = false;
 
   Future<void> _payForBooking(Booking booking) async {
-    // 1. Bevestig met inschatting van bedrag (zelfde formule als server).
-    final estimated = estimateBookingTotalEuro(booking);
-    final ownerShare = estimated * (1 - serviceFeeRate);
-    final fee = estimated - ownerShare;
+    debugPrint('[PAY] _payForBooking START booking=${booking.id} processingPayment=$_processingPayment');
+    // Pay-after-charge: het exacte bedrag is bekend uit total_amount_cents
+    // dat door de owner is vastgezet bij het betaalverzoek. We gebruiken
+    // bewust NIET kwh × current charger.price — die kan veranderd zijn na
+    // het verzoek (bug #69), waardoor wat de booker ziet zou wijken van
+    // wat Stripe daadwerkelijk charged.
+    final kwh = booking.kwhConsumed;
+    final exact = bookingPayableEuro(booking);
+    if (kwh == null || exact == null || exact <= 0) {
+      // Mag eigenlijk niet voorkomen — Betalen-knop hoort alleen te tonen
+      // als awaitingPayment true is, en die check vereist payment_requested_at.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bedrag is nog niet bekend — wacht op de eigenaar'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    // Breakdown voor de booker:
+    //   • Stroom (kWh × paalprijs) — gaat naar de host
+    //   • Servicefee (kWh × €0,03)  — voor Pluggo
+    //   • Mini-sessie fee €0,40    — alleen bij kWh < 10
+    // Het bedrag dat al vastgelegd is (`exact`) is inclusief alle fees.
+    final pricePerKwh = parseChargerPrice(booking.charger?.price ?? '0');
+    final stroomDeel = kwh * pricePerKwh;
+    final servicefeeDeel = kwh * bookerFeePerKwh;
+    final smallFee = smallSessionFeeFor(kwh);
+    final allInPerKwh = bookerPricePerKwh(booking.charger?.price ?? '0');
+    final kwhStr = kwh.toStringAsFixed(2).replaceAll('.', ',');
+    final allInStr = allInPerKwh.toStringAsFixed(2).replaceAll('.', ',');
 
     if (!mounted) return;
     final confirm = await showDialog<bool>(
@@ -7343,25 +9695,34 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Betalen via Mollie'),
+        title: const Text('Boeking afrekenen'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Geschatte kosten op basis van ${booking.duration.inHours} uur '
-              'laden bij ${estimatedKwPerHour.toString().replaceAll('.', ',')} kW:',
+              'De eigenaar heeft ingevuld dat je $kwhStr kWh hebt afgenomen '
+              'à €$allInStr per kWh (incl. €0,03 servicefee).',
               style: GoogleFonts.inter(fontSize: 14),
             ),
             const SizedBox(height: 12),
-            _payRow('Totaal', formatEuroDouble(estimated), bold: true),
+            _payRow('Totaal', formatEuroDouble(exact), bold: true),
             const SizedBox(height: 4),
-            _payRow('Naar de eigenaar (95%)', formatEuroDouble(ownerShare)),
-            _payRow('Pluggo servicefee (5%)', formatEuroDouble(fee)),
+            _payRow('Stroom (paalprijs)', formatEuroDouble(stroomDeel)),
+            _payRow(
+              'Pluggo servicefee (€0,03/kWh)',
+              formatEuroDouble(servicefeeDeel),
+            ),
+            if (smallFee > 0)
+              _payRow(
+                'Mini-sessie fee (<10 kWh)',
+                formatEuroDouble(smallFee),
+              ),
             const SizedBox(height: 12),
             Text(
-              'Je wordt naar Mollie gestuurd om met iDEAL of een andere '
-              'methode te betalen. Na de betaling kom je terug in de app.',
+              'Je kunt betalen met iDEAL, Apple Pay, Google Pay of '
+              'creditcard. De betaalpagina opent in Safari; je komt '
+              'daarna automatisch terug in de app.',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 color: AppColors.textSecondary,
@@ -7392,45 +9753,156 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
     setState(() => _processingPayment = true);
     try {
-      // 2. Roep de create-payment edge function aan.
-      final res = await supabase.functions.invoke(
-        'create-payment',
-        body: {'booking_id': booking.id},
+      // 1. Vraag een Stripe Checkout Session aan via onze edge function.
+      //    StripeService gooit StripeServiceException met een NL-bericht
+      //    bij voorspelbare faal-paden (boeking al betaald, owner niet
+      //    charges_enabled, etc.).
+      final session = await StripeService.instance.createCheckoutSession(
+        bookingId: booking.id,
+      );
+      debugPrint(
+        '[PAY] got session: cs=${session.checkoutSessionId} url-prefix=${session.checkoutUrl.length > 40 ? session.checkoutUrl.substring(0, 40) : session.checkoutUrl} amount=${session.amountCents}c reused=${session.reused}',
       );
 
-      // supabase.functions.invoke returnt een FunctionResponse met data
-      // (Map of String) en status. Bij non-2xx gooit 'ie geen exception,
-      // we moeten zelf checken.
-      final data = res.data;
-      if (res.status != null && res.status! >= 400) {
-        final msg = data is Map<String, dynamic>
-            ? (data['error'] as String? ?? 'Onbekende fout')
-            : 'Server fout (${res.status})';
-        throw Exception(msg);
-      }
-      if (data is! Map<String, dynamic>) {
-        throw Exception('Onverwacht antwoord van server');
-      }
-      final checkoutUrl = data['checkout_url'] as String?;
-      if (checkoutUrl == null || checkoutUrl.isEmpty) {
-        throw Exception('Geen checkout URL ontvangen');
-      }
-
-      // 3. Open Mollie checkout in externe browser. externalApplication
-      // is essentieel: native iDEAL apps kunnen alleen vanuit Safari/Chrome
-      // worden gelaunched, niet vanuit een in-app webview.
-      final uri = Uri.parse(checkoutUrl);
+      // 2. Open de Checkout URL in externe Safari. externalApplication is
+      //    BELANGRIJK — niet inAppWebView, want:
+      //      • Apple Pay / Google Pay werkt alleen in echte Safari/Chrome
+      //      • iDEAL-bank-redirects naar nl.icscards.app etc. werken alleen
+      //        als de browser de universal-link kan oppakken
+      //      • Stripe blokkeert Checkout in embedded webviews vanaf 2024
+      //        (anti-fraud measure)
+      debugPrint('[PAY] launching Checkout URL in external Safari…');
+      final uri = Uri.parse(session.checkoutUrl);
       final launched = await launchUrl(
         uri,
         mode: LaunchMode.externalApplication,
       );
       if (!launched) {
-        throw Exception('Kon checkout-pagina niet openen');
+        debugPrint('[PAY] launchUrl returned false — geen browser kon de URL openen');
+        throw StripeServiceException(
+          'Kon de betaalpagina niet openen — werkt je browser?',
+        );
+      }
+      debugPrint('[PAY] Safari opened — starting polling for booking status…');
+
+      // 3. Wachtdialog terwijl we de booking status pollen. Gebruiker is
+      //    nu in Safari; deze dialog zien ze pas als ze terugkeren naar
+      //    de app (via pluggo:// deeplink of handmatig). Belangrijk dat
+      //    de dialog NIET-dismissible is, anders kan een mis-tap de
+      //    polling-loop afbreken vlak voor de webhook binnenkomt.
+      bool dialogShown = false;
+      bool dialogClosed = false;
+      void closeDialog() {
+        if (dialogShown && !dialogClosed && mounted) {
+          dialogClosed = true;
+          Navigator.of(context, rootNavigator: true).pop();
+        }
       }
 
-      // 4. Na terugkeer (deep link of handmatig terug-tikken): refresh.
-      if (mounted) await _load();
-    } catch (e) {
+      // Fire-and-forget de dialog zodat 'ie naast de polling-await draait.
+      // ignore: unawaited_futures
+      Future<void>(() async {
+        if (!mounted) return;
+        dialogShown = true;
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                const CircularProgressIndicator(),
+                const SizedBox(height: 20),
+                Text(
+                  'Wachten op je betaling...',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Rond je betaling af in Safari. Je kunt deze dialog '
+                  'open laten — we werken je boeking automatisch bij '
+                  'zodra Stripe bevestigt.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  dialogClosed = true;
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text('Sluiten'),
+              ),
+            ],
+          ),
+        );
+      });
+
+      // 4. Poll booking.payment_status tot 'paid' of timeout. De webhook
+      //    update de booking server-side; wij detecteren dat hier zodat
+      //    de UI in sync komt. Max 5 minuten — typische Checkout flow
+      //    duurt 30-90s (iDEAL bank-redirect is het langst).
+      final paid = await StripeService.instance.waitForBookingPayment(
+        bookingId: booking.id,
+      );
+      debugPrint('[PAY] polling klaar: paid=$paid');
+
+      closeDialog();
+
+      if (!mounted) return;
+      if (paid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Betaling gelukt — bedankt!'),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        await _load();
+      } else {
+        // Geen 'paid' binnen 5 minuten. Kan zijn dat de gebruiker afhaakte
+        // in Safari, of dat een iDEAL-betaling extra lang duurt (zeldzaam).
+        // We refreshen één keer voor de zekerheid en laten een vriendelijk
+        // bericht achter — geen "FOUT" snackbar want technisch is er niets
+        // mislukt; de webhook kan nog komen.
+        await _load();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'We zien je betaling nog niet — check je boekingen over een paar minuten.',
+            ),
+            backgroundColor: AppColors.textSecondary,
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
+    } on StripeServiceException catch (e) {
+      debugPrint('[PAY] StripeServiceException: ${e.message} (status=${e.statusCode})');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Betalen mislukt: ${e.message}'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[PAY] OTHER exception: $e\n$st');
       if (!mounted) return;
       final msg = e.toString().replaceFirst('Exception: ', '');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -7441,6 +9913,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         ),
       );
     } finally {
+      debugPrint('[PAY] finally — resetting processingPayment');
       if (mounted) setState(() => _processingPayment = false);
     }
   }
@@ -7670,7 +10143,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           'subject': ownerSubject,
           'html': ownerHtml,
         });
-      } catch (_) {/* best-effort */}
+      } catch (e, st) {
+        debugPrint('send-email (problem report → owner) failed: $e\n$st');
+      }
     }
 
     // 2) Notificatie naar info@pluggoapp.nl voor support log
@@ -7693,7 +10168,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         'subject': supportSubject,
         'html': supportHtml,
       });
-    } catch (_) {/* best-effort */}
+    } catch (e, st) {
+      debugPrint('send-email (problem report → support log) failed: $e\n$st');
+    }
   }
 
   @override
@@ -7897,11 +10374,54 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 ),
               ],
             ),
-            // Betalen — eigenaar heeft de boeking goedgekeurd, maar de
-            // boeker moet nog afrekenen. Toon prominente CTA met geschat
-            // bedrag. Verdwijnt zodra payment_status = 'paid'.
-            if (booking.awaitingPayment && !isPast) ...[
+            // Pay-after-charge: boeking is voorbij maar owner heeft
+            // nog geen kWh ingevuld. Boeker wacht op afrekening.
+            if (booking.awaitingKwhInput) ...[
               const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7E6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.hourglass_top_rounded,
+                      size: 16,
+                      color: Color(0xFFB07000),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Wachten op afrekening — de eigenaar gaat het '
+                        'aantal afgenomen kWh invullen.',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: const Color(0xFFB07000),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            // Betalen — owner heeft kWh ingevuld én betaalverzoek verstuurd.
+            // Toon prominente CTA met exact bedrag. Verdwijnt zodra paid.
+            if (booking.awaitingPayment) ...[
+              const SizedBox(height: 12),
+              if (booking.kwhConsumed != null) ...[
+                Text(
+                  '${booking.kwhConsumed!.toStringAsFixed(2).replaceAll('.', ',')} kWh '
+                  '× €${bookerPricePerKwh(booking.charger?.price ?? '0').toStringAsFixed(2).replaceAll('.', ',')} '
+                  'per kWh (incl. €0,03 servicefee)',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -7921,7 +10441,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                   label: Text(
                     _processingPayment
                         ? 'Bezig…'
-                        : 'Betalen — ${formatEuroDouble(estimateBookingTotalEuro(booking))}',
+                        : 'Betalen — ${formatEuroDouble(bookingPayableEuro(booking) ?? 0)}',
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
@@ -7944,7 +10464,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     ? "Betaling wordt verwerkt — je kunt 'm hier opnieuw afronden als 't onderbroken werd."
                     : booking.paymentStatus == 'failed'
                         ? 'Vorige betaalpoging mislukt. Probeer het opnieuw.'
-                        : 'Reservering is pas definitief na betaling.',
+                        : 'Rond de betaling binnen 7 dagen af, anders kun je tijdelijk geen nieuwe boekingen maken.',
                 style: GoogleFonts.inter(
                   fontSize: 11,
                   color: AppColors.textSecondary,
@@ -7952,7 +10472,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               ),
             ],
             // Betaald — kleine groene check-bevestiging
-            if (booking.isPaid && !isPast) ...[
+            if (booking.isPaid) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -8139,6 +10659,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   // Net geselecteerde foto die nog moet worden geüpload
   XFile? _pickedAvatar;
 
+  // Pluggo Pionier-status — read-only, alleen door Pluggo zelf te wijzigen
+  // (zie 0009_pioneer_status.sql trigger). Tonen we als een gouden banner
+  // bovenaan het profiel voor de mensen die deze status hebben.
+  bool _isPioneer = false;
+  DateTime? _pioneerSince;
+
   @override
   void initState() {
     super.initState();
@@ -8149,17 +10675,103 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
     _ibanController = TextEditingController();
     _currentAvatarUrl = meta?['avatar_url'] as String?;
-    // IBAN staat in profiles.iban — niet in user_metadata. Async laden.
-    _loadIban();
+    // IBAN + Pionier-status staan in profiles — niet in user_metadata.
+    // Async laden in één call.
+    _loadProfileExtras();
   }
 
-  Future<void> _loadIban() async {
-    final iban = await fetchCurrentUserIban();
-    if (!mounted) return;
-    setState(() {
-      if (iban != null) _ibanController.text = prettyIban(iban);
-      _loadingIban = false;
-    });
+  Future<void> _loadProfileExtras() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      if (mounted) setState(() => _loadingIban = false);
+      return;
+    }
+    try {
+      final row = await supabase
+          .from('profiles')
+          .select('iban, is_pioneer, pioneer_since')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (!mounted) return;
+      if (row == null) {
+        setState(() => _loadingIban = false);
+        return;
+      }
+      final iban = row['iban'] as String?;
+      final pioneer = row['is_pioneer'] as bool? ?? false;
+      final since = row['pioneer_since'] as String?;
+      setState(() {
+        if (iban != null && iban.isNotEmpty) {
+          _ibanController.text = prettyIban(iban);
+        }
+        _isPioneer = pioneer;
+        _pioneerSince = since != null ? DateTime.tryParse(since) : null;
+        _loadingIban = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingIban = false);
+    }
+  }
+
+  /// Gouden banner die alleen verschijnt bij Pluggo Pioniers.
+  /// Toont de badge + een korte erkenning, en zo mogelijk "Pionier sinds …".
+  Widget _pioneerBanner() {
+    String? sinceLabel;
+    if (_pioneerSince != null) {
+      final local = _pioneerSince!.toLocal();
+      sinceLabel = '${_monthNames[local.month]} ${local.year}';
+    }
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFF6D6), Color(0xFFFDEAB3)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.pioneer.withOpacity(0.45),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.pioneer.withOpacity(0.18),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const PioneerBadge(size: PioneerBadgeSize.large),
+          const SizedBox(height: 10),
+          Text(
+            'Je bent een Pluggo Pionier',
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: AppColors.pioneerDark,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            sinceLabel != null
+                ? 'Pionier sinds $sinceLabel. Je paal krijgt voorrang in de '
+                    'zoekresultaten binnen je postcode-gebied — bedankt dat '
+                    'je er vroeg in geloofde.'
+                : 'Je paal krijgt voorrang in de zoekresultaten binnen je '
+                    'postcode-gebied — bedankt dat je er vroeg in geloofde.',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: AppColors.pioneerDark.withOpacity(0.85),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -8342,7 +10954,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 20),
+                // Pluggo Pionier-banner — alleen zichtbaar voor wie deze
+                // status heeft. Read-only — kan alleen door Pluggo zelf
+                // gezet worden (zie 0009_pioneer_status.sql trigger).
+                if (_isPioneer) _pioneerBanner(),
+                if (_isPioneer) const SizedBox(height: 20),
+                const SizedBox(height: 8),
                 // Naam
                 Text(
                   'Naam',
@@ -8430,7 +11048,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 6),
                 Text(
                   'Verplicht als je een laadpaal wilt aanbieden — '
-                  'op deze rekening krijg je je 95% uitbetaald.',
+                  'op deze rekening krijg je je aandeel uitbetaald '
+                  '(je paalprijs minus €0,03/kWh servicefee).',
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     color: AppColors.textSecondary,
@@ -9044,10 +11663,19 @@ class _MyReviewsScreenState extends State<MyReviewsScreen> {
     if (text == null || text.isEmpty) return;
 
     try {
-      await supabase.from('booker_reviews').update({
-        'booker_reply': text,
-        'booker_replied_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', r.id);
+      final updated = await supabase
+          .from('booker_reviews')
+          .update({
+            'booker_reply': text,
+            'booker_replied_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', r.id)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Reactie werd geweigerd. Mogelijk ben je niet meer de boeker.',
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -10224,6 +12852,165 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
                 ],
               ),
             ],
+            // Pay-after-charge: na afloop moet de eigenaar het werkelijke
+            // afgenomen kWh invullen, dan stuurt de app een betaalverzoek
+            // naar de boeker.
+            if (b.awaitingKwhInput) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.bolt_rounded,
+                          size: 16,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Vul afgenomen kWh in',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Lees het aantal kWh af op je laadpaal of in de app van je auto. '
+                      'Daarna sturen we een betaalverzoek naar $bookerName.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _enterKwhForBooking(b),
+                        icon: const Icon(Icons.edit_rounded, size: 16),
+                        label: const Text('Vul kWh in'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          textStyle: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            // Owner heeft kWh ingevuld, wacht nu op betaling van boeker
+            if (b.paymentRequestedAt != null && !b.isPaid && isPast) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7E6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.hourglass_top_rounded,
+                      size: 16,
+                      color: Color(0xFFB07000),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            // We tonen het bedrag dat locked is op het
+                            // moment van het betaalverzoek (total_amount_cents),
+                            // niet de live kWh × current price — anders zou
+                            // dit getal kunnen wijzigen als de owner achteraf
+                            // de paalprijs aanpast (bug #69).
+                            b.kwhConsumed != null && bookingPayableEuro(b) != null
+                                ? 'Betaalverzoek verstuurd: '
+                                    '${b.kwhConsumed!.toStringAsFixed(2).replaceAll('.', ',')} kWh × '
+                                    '€${(bookingPayableEuro(b)! / b.kwhConsumed!).toStringAsFixed(2).replaceAll('.', ',')} '
+                                    '= ${formatEuroDouble(bookingPayableEuro(b)!)}'
+                                : 'Wachten op betaling',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFFB07000),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Boeker is nog niet betaald. Je krijgt je aandeel '
+                            '(paalprijs − €0,03/kWh) uitbetaald zodra de betaling binnen is.',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            // Boeker heeft betaald — owner kan zien dat het binnen is
+            if (b.isPaid && isPast) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      size: 16,
+                      color: AppColors.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        b.kwhConsumed != null && b.totalAmountCents != null
+                            ? 'Betaald: ${formatEuroCents(b.totalAmountCents!)} '
+                                '(${b.kwhConsumed!.toStringAsFixed(2).replaceAll('.', ',')} kWh)'
+                            : 'Betaald',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             // Afgelopen + bevestigd (geen pending/cancelled/rejected) →
             // eigenaar kan boeker beoordelen
             if (isPast && b.status == 'confirmed') ...[
@@ -10289,6 +13076,438 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
     );
   }
 
+  // ----------------------------------------------------------------
+  // Pay-after-charge: owner vult werkelijk afgenomen kWh in. We slaan
+  // 't op in `bookings.kwh_consumed`, berekenen de bedragen, en zetten
+  // payment_requested_at = now() zodat de boeker de Betalen-knop
+  // krijgt. Daarna mailen we de boeker via de send-email edge function.
+  // ----------------------------------------------------------------
+  Future<void> _enterKwhForBooking(Booking b) async {
+    // ----------------------------------------------------------------
+    // Guard tegen dubbel-submit: de UI verbergt deze knop normaliter
+    // zodra `kwh_consumed` gevuld is, maar tussen de eerste DB-update
+    // en het volgende `_load()` is er een gat van een paar honderd ms
+    // waarin de lokale `Booking b` nog `kwhConsumed == null` heeft.
+    // Een tweede tap binnen dat venster zou de booking opnieuw met
+    // een andere waarde overschrijven — terwijl de Stripe-betaling
+    // al voor het eerste bedrag aangemaakt is.
+    // We doen daarom een verse server-check vóór we de dialog tonen.
+    // ----------------------------------------------------------------
+    try {
+      final freshRow = await supabase
+          .from('bookings')
+          .select('kwh_consumed, payment_requested_at, payment_status')
+          .eq('id', b.id)
+          .maybeSingle();
+      if (freshRow != null) {
+        final kwhAlreadySet = freshRow['kwh_consumed'] != null;
+        final requestAlreadySent =
+            freshRow['payment_requested_at'] != null;
+        final ps = (freshRow['payment_status'] as String?) ?? 'unpaid';
+        final paymentInFlight = ps == 'pending' || ps == 'paid';
+        if (kwhAlreadySet || requestAlreadySent || paymentInFlight) {
+          if (!mounted) return;
+          final existingKwh = freshRow['kwh_consumed'];
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: const Text('Betaalverzoek al verstuurd'),
+              content: Text(
+                existingKwh != null
+                    ? 'Je hebt voor deze boeking al een betaalverzoek '
+                          'verstuurd (${(existingKwh as num).toStringAsFixed(2).replaceAll('.', ',')} kWh). '
+                          'Klopt dit niet? Neem contact op met support — '
+                          'wij kunnen het bedrag aanpassen of de betaling '
+                          'terugstorten.'
+                    : 'Je hebt voor deze boeking al een betaalverzoek '
+                          'verstuurd. Klopt dit niet? Neem contact op met '
+                          'support.',
+                style: GoogleFonts.inter(fontSize: 13),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          // Refresh de lijst zodat de knop daadwerkelijk verdwijnt
+          _load();
+          return;
+        }
+      }
+    } catch (_) {
+      // Niet fataal — als de pre-check faalt, vallen we terug op het
+      // oude gedrag. Beter de gebruiker doorlaten dan permanent blokkeren.
+    }
+
+    final kwhCtrl = TextEditingController();
+    final pricePerKwh = parseChargerPrice(b.charger?.price ?? '0');
+    final allInPerKwh = bookerPricePerKwh(b.charger?.price ?? '0');
+    final hostNetPerKwh = hostNetPricePerKwh(b.charger?.price ?? '0');
+
+    // Live preview-state in de dialog. previewKwh houden we apart bij
+    // zodat we breakdowns in beide richtingen kunnen tonen.
+    double? previewKwh;
+    double? previewTotal; // wat de booker betaalt (incl. €0,03/kWh fee)
+    String? errorText;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            void recompute() {
+              final raw = kwhCtrl.text.trim().replaceAll(',', '.');
+              final parsed = double.tryParse(raw);
+              if (parsed == null) {
+                previewKwh = null;
+                previewTotal = null;
+                errorText = raw.isEmpty ? null : 'Ongeldig getal';
+              } else if (parsed <= 0) {
+                previewKwh = null;
+                previewTotal = null;
+                errorText = 'Moet groter zijn dan 0';
+              } else if (parsed > 200) {
+                // Sanity check — een privé-paal levert geen 200 kWh in een sessie
+                previewKwh = null;
+                previewTotal = null;
+                errorText = 'Te hoog — controleer je waarde';
+              } else {
+                previewKwh = parsed;
+                previewTotal =
+                    parsed * allInPerKwh + smallSessionFeeFor(parsed);
+                errorText = null;
+              }
+              setLocal(() {});
+            }
+
+            final ownerShare = (previewKwh ?? 0) * hostNetPerKwh;
+            final smallFee = smallSessionFeeFor(previewKwh ?? 0);
+
+            return AlertDialog(
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: const Text('Afgenomen kWh invullen'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Vul in hoeveel kWh ${b.userName ?? 'de boeker'} heeft '
+                      'afgenomen. Lees dit af op je laadpaal of energiemeter.',
+                      style: GoogleFonts.inter(fontSize: 13),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: kwhCtrl,
+                      autofocus: true,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      onChanged: (_) => recompute(),
+                      decoration: InputDecoration(
+                        labelText: 'kWh afgenomen',
+                        hintText: 'bv. 12,5',
+                        suffixText: 'kWh',
+                        errorText: errorText,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.background,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Jouw paalprijs: €${pricePerKwh.toStringAsFixed(2).replaceAll('.', ',')} per kWh',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          Text(
+                            'Boeker betaalt: €${allInPerKwh.toStringAsFixed(2).replaceAll('.', ',')} per kWh '
+                            '(incl. €0,03 servicefee)',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          Text(
+                            'Jij ontvangt: €${hostNetPerKwh.toStringAsFixed(2).replaceAll('.', ',')} per kWh '
+                            '(na €0,03 servicefee)',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          if (previewTotal != null) ...[
+                            _payRow(
+                              'Totaal voor boeker',
+                              formatEuroDouble(previewTotal!),
+                              bold: true,
+                            ),
+                            const SizedBox(height: 2),
+                            _payRow(
+                              'Naar jou',
+                              formatEuroDouble(ownerShare),
+                            ),
+                            _payRow(
+                              'Pluggo servicefee (€0,06/kWh)',
+                              formatEuroDouble(
+                                (previewKwh ?? 0) * pluggoFeePerKwh,
+                              ),
+                            ),
+                            if (smallFee > 0)
+                              _payRow(
+                                'Mini-sessie fee (<10 kWh)',
+                                formatEuroDouble(smallFee),
+                              ),
+                          ] else
+                            Text(
+                              'Vul kWh in om het bedrag te berekenen',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Annuleren'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: previewTotal == null
+                      ? null
+                      : () => Navigator.pop(ctx, true),
+                  child: const Text('Verstuur betaalverzoek'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    final kwh = double.tryParse(kwhCtrl.text.trim().replaceAll(',', '.'));
+    if (kwh == null || kwh <= 0) return;
+
+    // Pricing-model (per mei 2026):
+    //   booker betaalt = kWh × (paalprijs + €0,03) + €0,40 als kWh < 10
+    //   pluggo houdt   = kWh × €0,06 + €0,40 als kWh < 10
+    //   host ontvangt  = kWh × (paalprijs − €0,03)  — onafhankelijk van fee
+    final smallFee = smallSessionFeeFor(kwh);
+    final totalEuro = kwh * (pricePerKwh + bookerFeePerKwh) + smallFee;
+    final totalCents = (totalEuro * 100).round();
+    final feeCents =
+        (kwh * pluggoFeePerKwh * 100).round() + (smallFee * 100).round();
+    final ownerCents = totalCents - feeCents;
+
+    try {
+      // Belangrijk: we voegen .select() toe zodat Supabase de geüpdatete rij
+      // teruggeeft. Zonder .select() returnt een RLS-rejected update óók
+      // succesvol (met 0 rijen), waardoor we silent failures niet zagen
+      // (bug: owner zag "Betaalverzoek verstuurd" terwijl DB ongewijzigd bleef).
+      final updated = await supabase
+          .from('bookings')
+          .update({
+            'kwh_consumed': kwh,
+            'payment_requested_at': DateTime.now().toUtc().toIso8601String(),
+            'total_amount_cents': totalCents,
+            'service_fee_cents': feeCents,
+            'owner_share_cents': ownerCents,
+          })
+          .eq('id', b.id)
+          .select('id, kwh_consumed');
+
+      if (updated.isEmpty) {
+        throw Exception(
+          'Update werd geweigerd (0 rijen aangepast). Mogelijk RLS-probleem '
+          'of je bent niet meer eigenaar van deze paal.',
+        );
+      }
+
+      // Best-effort: stuur boeker een email dat 'ie kan betalen.
+      _sendPaymentRequestEmail(b, kwh, totalEuro);
+
+      // Push naar de boeker — die moet weten dat er een betaalverzoek staat.
+      // Fire-and-forget.
+      // ignore: unawaited_futures
+      PluggoPush.sendTo(
+        userId: b.userId,
+        title: 'Betaalverzoek voor je laadsessie',
+        body:
+            'De eigenaar heeft ${kwh.toStringAsFixed(1)} kWh ingevuld — '
+            'open de app om ${formatEuroDouble(totalEuro)} te betalen.',
+        data: {
+          'type': 'payment_requested',
+          'booking_id': b.id,
+        },
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Betaalverzoek van ${formatEuroDouble(totalEuro)} verstuurd',
+          ),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon kWh niet opslaan: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // Helper: kleine "label - value" rij voor de payment-preview.
+  // ----------------------------------------------------------------
+  Widget _payRow(String label, String value, {bool bold = false}) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ----------------------------------------------------------------
+  // Stuurt boeker een mail met het betaalverzoek na invullen kWh.
+  // Hergebruikt de bestaande `send-email` edge function.
+  // ----------------------------------------------------------------
+  Future<void> _sendPaymentRequestEmail(
+    Booking b,
+    double kwh,
+    double totalEuro,
+  ) async {
+    final to = b.userEmail;
+    if (to == null || to.isEmpty) return;
+
+    final chargerName = b.charger?.name ?? 'de laadpaal';
+    final boekerNaam = b.userName?.split(' ').first ?? 'daar';
+    // De prijs die we de booker tonen is de all-in prijs (paalprijs +
+    // €0,03/kWh servicefee). totalEuro is al inclusief deze fee én eventuele
+    // mini-sessie fee bij kWh < 10.
+    final allInPerKwh = bookerPricePerKwh(b.charger?.price ?? '0');
+    final smallFee = smallSessionFeeFor(kwh);
+    final kwhStr = kwh.toStringAsFixed(2).replaceAll('.', ',');
+    final priceStr = allInPerKwh.toStringAsFixed(2).replaceAll('.', ',');
+    final totalStr = totalEuro.toStringAsFixed(2).replaceAll('.', ',');
+    final stroomDeel = kwh * allInPerKwh;
+    final stroomStr = stroomDeel.toStringAsFixed(2).replaceAll('.', ',');
+
+    final subject = 'Je laadbeurt is klaar — betaal €$totalStr';
+
+    final html = '''
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px;">
+    <h1 style="margin:0 0 8px;color:#00A87E;font-size:24px;">Pluggo</h1>
+    <p style="margin:0 0 24px;color:#666;font-size:14px;">Buren laden bij buren</p>
+
+    <h2 style="margin:0 0 16px;font-size:20px;color:#222;">Hoi $boekerNaam,</h2>
+
+    <p style="margin:0 0 16px;color:#444;font-size:14px;">
+      Je laadbeurt bij <strong>$chargerName</strong> is afgerond. De eigenaar
+      heeft ingevuld dat je $kwhStr kWh hebt afgenomen.
+    </p>
+
+    <div style="background:#E6F7F0;border-left:4px solid #00A87E;padding:16px 20px;margin:24px 0;border-radius:6px;">
+      <p style="margin:0;color:#005C44;font-size:14px;">
+        $kwhStr kWh × €$priceStr per kWh (incl. €0,03 servicefee) = €$stroomStr
+      </p>
+      ${smallFee > 0 ? '''<p style="margin:4px 0 0;color:#005C44;font-size:14px;">
+        Mini-sessie fee (sessie &lt;10 kWh): €0,40
+      </p>''' : ''}
+      <p style="margin:8px 0 0;color:#005C44;font-size:20px;font-weight:600;">
+        Totaal: €$totalStr
+      </p>
+    </div>
+
+    <p style="margin:0 0 8px;color:#444;font-size:14px;">
+      Open de Pluggo-app om je boeking af te rekenen via iDEAL of een andere
+      methode. De servicefee bedraagt €0,03/kWh${smallFee > 0 ? ' plus een eenmalige €0,40 mini-sessie fee omdat deze sessie onder de 10 kWh blijft' : ''} — de rest gaat naar de eigenaar.
+    </p>
+
+    <p style="margin:16px 0 0;color:#666;font-size:13px;">
+      Tip: rond de betaling binnen 7 dagen af, anders kun je tijdelijk geen
+      nieuwe boekingen meer maken.
+    </p>
+
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px;">
+    <p style="margin:0;color:#999;font-size:12px;">Je ontvangt deze mail omdat je een laadbeurt hebt gemaakt via Pluggo.</p>
+  </div>
+</body>
+</html>
+''';
+
+    try {
+      await supabase.functions.invoke(
+        'send-email',
+        body: {'to': to, 'subject': subject, 'html': html},
+      );
+    } catch (e, st) {
+      debugPrint('send-email (payment request → booker) failed: $e\n$st');
+    }
+  }
+
   // Opent een dialog met booker review-samenvatting + bevestigingsknop.
   // accept=true -> status wordt 'confirmed', anders 'rejected'.
   Future<void> _decideOnBooking(Booking b, {required bool accept}) async {
@@ -10322,10 +13541,19 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
 
     // 2) Status updaten in DB
     try {
-      await supabase
+      // .select() verplicht zodat we silent RLS-fails detecteren —
+      // zonder .select() retourneert een geweigerde update óók success.
+      final updated = await supabase
           .from('bookings')
           .update({'status': accept ? 'confirmed' : 'rejected'})
-          .eq('id', b.id);
+          .eq('id', b.id)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Update werd geweigerd (0 rijen aangepast). Mogelijk ben je niet '
+          'meer eigenaar van deze paal of is de boeking ondertussen gewijzigd.',
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -10341,6 +13569,24 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
       // 3) Roep send-email edge function aan om de boeker per e-mail te
       //    informeren. Fire-and-forget — als het faalt blokkeert dat de UI niet.
       _sendDecisionEmail(b, accept);
+
+      // 4) Push naar de boeker — die wil meteen weten of de aanvraag door is.
+      // Fire-and-forget. b.userId is de boeker.
+      final chargerName = b.charger?.name ?? 'de laadpaal';
+      // ignore: unawaited_futures
+      PluggoPush.sendTo(
+        userId: b.userId,
+        title: accept
+            ? 'Boeking geaccepteerd'
+            : 'Boeking afgewezen',
+        body: accept
+            ? 'Je reservering bij $chargerName is bevestigd.'
+            : 'Helaas, je aanvraag voor $chargerName is afgewezen.',
+        data: {
+          'type': accept ? 'booking_confirmed' : 'booking_rejected',
+          'booking_id': b.id,
+        },
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -10429,8 +13675,8 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
           'html': html,
         },
       );
-    } catch (_) {
-      // E-mail is best-effort; in-app status is leidend.
+    } catch (e, st) {
+      debugPrint('send-email (decision → booker) failed: $e\n$st');
     }
   }
 
@@ -10504,10 +13750,17 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
 
     final reason = reasonCtrl.text.trim();
     try {
-      await supabase
+      final updated = await supabase
           .from('bookings')
           .update({'status': 'cancelled'})
-          .eq('id', b.id);
+          .eq('id', b.id)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Annulering werd geweigerd (0 rijen aangepast). '
+          'Mogelijk ben je niet meer eigenaar of is de boeking gewijzigd.',
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -10606,8 +13859,8 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
           'html': html,
         },
       );
-    } catch (_) {
-      // best-effort; in-app status is leidend
+    } catch (e, st) {
+      debugPrint('send-email (cancel → booker) failed: $e\n$st');
     }
   }
 }
@@ -11347,7 +14600,9 @@ class _ChatScreenState extends State<ChatScreen> {
       await supabase.from('conversations').update({
         'last_email_sent_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', conv.id);
-    } catch (_) {/* best-effort */}
+    } catch (e, st) {
+      debugPrint('send-email (chat notification) failed: $e\n$st');
+    }
   }
 
   String _formatTime(DateTime dt) {
@@ -11816,7 +15071,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              // Vóór 1 juli: launch-banner zodat nieuwe downloaders zien
+              // Vóór 7 juli: launch-banner zodat nieuwe downloaders zien
               // dat ze een seintje krijgen als ze nu vast een account
               // aanmaken. Verdwijnt automatisch zodra de launch live is.
               if (!bookingsAreLive) ...[
@@ -12047,7 +15302,7 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 20),
               // Pre-launch banner — gebruikers die nu vast registreren
-              // krijgen een seintje zodra boekingen open gaan op 1 juli.
+              // krijgen een seintje zodra Pluggo live gaat op 7 juli.
               if (!bookingsAreLive) ...[
                 const LaunchCountdownBanner(showAccountHint: true),
                 const SizedBox(height: 20),
@@ -12486,10 +15741,18 @@ class _ChargerCardState extends State<_ChargerCard> {
       _toggling = true;
     });
     try {
-      await supabase
+      // .select() zodat een silent RLS-fail niet als success doorgaat —
+      // dan zou de switch optisch geflipt blijven terwijl DB onveranderd is.
+      final updated = await supabase
           .from('chargers')
           .update({'available': newValue})
-          .eq('id', widget.charger.id);
+          .eq('id', widget.charger.id)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Wijziging werd geweigerd. Mogelijk ben je niet meer eigenaar.',
+        );
+      }
       widget.onChanged?.call();
     } catch (e) {
       if (!mounted) return;
@@ -12546,6 +15809,12 @@ class _ChargerCardState extends State<_ChargerCard> {
                               ),
                             ),
                           ),
+                          if (widget.charger.ownerIsPioneer) ...[
+                            const SizedBox(width: 6),
+                            const PioneerBadge(
+                              size: PioneerBadgeSize.small,
+                            ),
+                          ],
                           if (widget.charger.solar) ...[
                             const SizedBox(width: 6),
                             _solarBadge(small: true),
@@ -12596,8 +15865,13 @@ class _ChargerCardState extends State<_ChargerCard> {
                       const SizedBox(height: 8),
                       Row(
                         children: [
+                          // Eigen paal: toon eigen instelprijs.
+                          // Andermans paal: toon de all-in prijs voor de booker
+                          // (paalprijs + €0,03 servicefee).
                           Text(
-                            '€${widget.charger.price}',
+                            widget.isOwner
+                                ? '€${widget.charger.price}'
+                                : '€${bookerPricePerKwh(widget.charger.price).toStringAsFixed(2).replaceAll('.', ',')}',
                             style: GoogleFonts.inter(
                               fontWeight: FontWeight.w700,
                               color: AppColors.textPrimary,

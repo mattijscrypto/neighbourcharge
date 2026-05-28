@@ -39,5 +39,22 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+
+    # ----------------------------------------------------------------
+    # flutter_stripe (Stripe iOS SDK) vereist iOS 13+ en faalt
+    # silently te compileren als sub-pods op iOS 12 staan. Forceer
+    # IPHONEOS_DEPLOYMENT_TARGET = 14.0 op alle pods, anders krijgt
+    # alleen de Runner target dit en blijven Stripe-pods op de Pod
+    # default (12 of lager) zitten → SwiftCompile failures.
+    # ----------------------------------------------------------------
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+
+      # Excluded archs: voorkom dat Xcode Stripe probeert te bouwen
+      # voor i386/armv7 simulator (legacy archs die Stripe niet meer
+      # ondersteunt). M1/M2 Macs draaien simulator op arm64; oudere
+      # Intel Macs op x86_64. Beide blijven over.
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386 armv7'
+    end
   end
 end
