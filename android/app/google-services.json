@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "193193650606",
+    "project_id": "pluggo-7413b",
+    "storage_bucket": "pluggo-7413b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:193193650606:android:5d5c3ad4863bb9bfcf403f",
+        "android_client_info": {
+          "package_name": "nl.pluggoapp.pluggo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBLm5cYsEQ_RbiTa_WOCwoxyu7BjgshuaA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
