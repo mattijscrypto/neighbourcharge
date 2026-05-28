@@ -1,0 +1,36 @@
+# Pluggo — Supabase functions config
+# ----------------------------------------------------------------------------
+# Standaard staat verify_jwt = true op alle Edge Functions, wat betekent dat
+# requests zonder Authorization-header een 401 krijgen vóórdat onze code draait.
+#
+# Voor webhooks van externe services (Mollie / OPP / Stripe) moet dit UIT —
+# die kennen onze JWT niet en kunnen er ook geen meesturen. Authenticiteit
+# checken we server-side:
+#   • OPP    : verification_hash + re-fetch via OPP API met OPP_API_KEY
+#   • Mollie : re-fetch met MOLLIE_API_KEY
+#   • Stripe : HMAC-SHA256 signature met STRIPE_WEBHOOK_SECRET
+# ----------------------------------------------------------------------------
+
+[functions.mollie-webhook]
+verify_jwt = false
+
+[functions.opp-webhook]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+# stripe-checkout-return is een publieke HTTPS-landing-page waar Stripe Checkout
+# de gebruiker naartoe stuurt na een geslaagde of geannuleerde betaling.
+# Geen JWT mogelijk — request komt direct vanuit de browser na een redirect
+# vanuit Stripe-hosted checkout.stripe.com. Veiligheid: deze function geeft
+# alleen statische HTML terug, raakt geen DB, en kent geen authenticated state.
+[functions.stripe-checkout-return]
+verify_jwt = false
+
+# stripe-onboarding-return is een publieke HTTPS-bridge die Stripe Connect
+# account_links (KYC return_url + refresh_url) doorzet naar pluggo:// custom
+# URL scheme. Stripe weigert custom schemes als return/refresh URL, dus dit
+# is onze tussenstop. Pure 302 redirect, geen DB-toegang, geen state.
+[functions.stripe-onboarding-return]
+verify_jwt = false
