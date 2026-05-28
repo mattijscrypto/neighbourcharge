@@ -1,0 +1,70 @@
+-- ============================================================================
+-- 0017_fix_chargers_rls_recursion.sql — CRITICAL hotfix voor production
+-- (28 mei 2026, ontdekt via tester-screenshot: "infinite recursion detected
+--  in policy for relation 'chargers', code: 42P17, Internal Server Error").
+--
+-- ROOT CAUSE
+-- ----------------------------------------------------------------------------
+-- Migratie 0016 introduceerde drie RLS-policies op public.chargers. Eén
+-- ervan — `chargers_select_confirmed_booker` — heeft een subquery naar
+-- public.bookings:
+--
+--   exists (select 1 from public.bookings b
+--             where b.charger_id = chargers.id
+--               and b.user_id = auth.uid()
+--               and b.status = 'confirmed')
+--
+-- Maar 0007 had al de policy `bookings_update_owner` op bookings die zelf
+-- een subquery naar chargers doet:
+--
+--   exists (select 1 from public.chargers c
+--             where c.id = bookings.charger_id
+--               and c.owner_id = auth.uid())
+--
+-- Vóór 0016 had chargers geen RLS, dus deze cross-references waren veilig.
+-- Sinds 0016 triggeren ze elkaars policies: chargers → bookings → chargers
+-- → bookings → ... → Postgres geeft 42P17 op terug.
+--
+-- Symptoom: de Flutter-app kan `chargers` (en daarmee `chargers_public`,
+-- want security_invoker=true) niet meer laden. Map blijft leeg met error.
+--
+-- FIX
+-- ----------------------------------------------------------------------------
+-- Drop de problematische policy. Functioneel verliezen we niets:
+--   • Owners zien hun palen via `chargers_owner_all` (FOR ALL).
+--   • Iedereen (anon + authenticated) ziet alle chargers via
+--     `chargers_select_for_public_view` (USING true) — dit dekt ook de
+--     confirmed-booker use-case, want een authenticated user mag toch al
+--     SELECTen.
+--   • De confirmed_booker policy was alleen relevant voor een toekomstig
+--     scenario waarin column-level GRANT op chargers de safe-columns
+--     afschermt en alleen confirmed bookers de exacte lat/lng mogen zien.
+--     Dat is follow-up taak #188 en wordt daar opnieuw ontworpen zonder
+--     bookings-subquery (waarschijnlijk via een SECURITY DEFINER helper).
+--
+-- Idempotent: drop if exists.
+-- ============================================================================
+
+drop policy if exists "chargers_select_confirmed_booker" on public.chargers;
+
+-- ============================================================================
+-- DEPLOY
+-- ----------------------------------------------------------------------------
+-- Run direct in Supabase Studio SQL Editor of via `supabase db push`.
+-- De fix is een enkele DROP POLICY — instant, geen lock, geen downtime.
+--
+-- Verificatie:
+--   1. Open de Flutter-app als ingelogde tester → map moet laden.
+--   2. Supabase Studio → Database → Policies → bekijk public.chargers:
+--      Verwacht overgebleven policies:
+--        • chargers_owner_all              (FOR ALL, owner_id = auth.uid())
+--        • chargers_select_for_public_view (FOR SELECT, anon+auth, USING true)
+--
+-- FOLLOW-UP
+-- ----------------------------------------------------------------------------
+-- Task #188 (column-level GRANT op chargers) moet het confirmed-booker
+-- exact-lat/lng-pad opnieuw bouwen — maar dan zonder recursie. Aanpak:
+--   1. SECURITY DEFINER functie `user_has_confirmed_booking_for(uuid)`
+--      die bookings raadpleegt met RLS uit (alleen owner-only logic intern).
+--   2. Nieuwe SELECT-policy die deze functie aanroept i.p.v. inline subquery.
+-- ============================================================================
