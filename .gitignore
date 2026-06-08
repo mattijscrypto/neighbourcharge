@@ -93,5 +93,16 @@ secrets/
 # Internal/operational notes (kept locally, not for public repo)
 /_internal/
 
+# Marketing, outreach, product strategie — bevat persoonlijke contactgegevens
+# (gemeenteambtenaren, industrie-contacten) en concurrent-gevoelige strategie.
+# NIET in git, ook niet in private repos — emails horen niet in commit-history.
+/marketing/
+/product/
+/opp/
+
+# Supabase deployment runbooks — kunnen secrets bevatten als voorbeelden
+/supabase/STRIPE_DEPLOYMENT.md
+/supabase/*_DEPLOYMENT.md
+
 # Grote binaries — gebruik cloud-storage in plaats van git
 *.pptx
