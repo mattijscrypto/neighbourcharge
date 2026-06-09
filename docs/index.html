@@ -535,6 +535,50 @@
       color: #2A302D;
     }
 
+    /* ---------- FOUNDER ---------- */
+    .founder {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 40px;
+      align-items: start;
+      margin-top: 32px;
+    }
+    .founder-photo {
+      width: 240px;
+      height: 240px;
+      border-radius: 20px;
+      object-fit: cover;
+      display: block;
+      border: 1px solid var(--border);
+    }
+    .founder-text p {
+      font-size: 17px;
+      line-height: 1.7;
+      color: #2A302D;
+      margin: 0 0 16px;
+    }
+    .founder-text p:last-of-type {
+      margin-bottom: 20px;
+    }
+    .founder-sig {
+      font-size: 15px;
+      color: var(--muted);
+      font-style: italic;
+      margin-top: 8px;
+    }
+    @media (max-width: 720px) {
+      .founder {
+        grid-template-columns: 1fr;
+        gap: 24px;
+        justify-items: center;
+        text-align: left;
+      }
+      .founder-photo {
+        width: 200px;
+        height: 200px;
+      }
+    }
+
     /* ---------- FAQ ---------- */
     details {
       background: white;
@@ -667,6 +711,7 @@
         <a href="#slim-laden">Slim laden</a>
         <a href="#groene-transitie">Transitie</a>
         <a href="#impact">Impact</a>
+        <a href="#oprichter">Oprichter</a>
         <a href="#faq">FAQ</a>
         <a href="#meedoen" class="nav-cta">Doe mee</a>
       </div>
@@ -934,6 +979,29 @@
         <p>
           Geen extra beton, geen wachttijden, geen commerciële tussenpartijen. Een netwerk dat we samen bouwen — paal voor paal, buurt voor buurt. Pluggo is daar pas het begin van: vandaag laden, morgen lokale energie-uitwisseling en een buurtinfrastructuur waar we trots op zijn.
         </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="oprichter">
+    <div class="section-inner section-narrow">
+      <div class="eyebrow">De oprichter</div>
+      <h2>Een gezicht achter Pluggo</h2>
+
+      <div class="founder">
+        <img class="founder-photo" src="img/raka_cazander.jpg" alt="Raka Cazander, oprichter van Pluggo" width="240" height="240">
+        <div class="founder-text">
+          <p>
+            Naast het moederschap van vier kleine kinderen ben ik Pluggo begonnen, een start-up die maatschappelijke impact kan hebben — laadcapaciteit ontsluiten die er al is, in plaats van overal nieuwe palen bij te zetten.
+          </p>
+          <p>
+            Strategie, productontwerp, app- en website-bouw, gesprekken met gemeenten en brancheorganisaties en PR doe ik tot dusver allemaal zelf. Een leuke uitdaging die past bij hoe ik werk: breed betrokken, weinig schroom om dingen zelf uit te zoeken, doorgaan tot het staat.
+          </p>
+          <p>
+            Met de juiste samenwerkingen en maatschappelijk draagvlak kan Pluggo de Airbnb van de laadpaal worden.
+          </p>
+          <p class="founder-sig">— Raka Cazander, oprichter Pluggo</p>
+        </div>
       </div>
     </div>
   </section>
