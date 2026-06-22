@@ -69,6 +69,124 @@
           "priceCurrency": "EUR"
         },
         "publisher": { "@id": "https://pluggoapp.nl/#organization" }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://pluggoapp.nl/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Wanneer gaat de app live?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Op 7 juli 2026 staat de Pluggo-app in de Apple App Store en Google Play Store, en openen de boekingen tegelijk landelijk. Vanaf die dag kun je de app downloaden, een account aanmaken, je laadpaal toevoegen én — als EV-rijder — bij andere palen in heel Nederland terecht."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat verdien ik als ik mijn paal deel?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Dat bepaal je zelf — jij stelt je prijs per kWh in. Bij een paar laadsessies per week is €100 tot €200 per maand realistisch. Pluggo houdt een transparante servicefee van €0,03 per kWh aan beide kanten in: de boeker betaalt €0,03/kWh extra bovenop jouw paalprijs, en op de uitbetaling aan jou wordt €0,03/kWh in mindering gebracht."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Hoe weet ik wat een eerlijke prijs is voor mijn paal?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Een goede vuistregel: neem je eigen kale stroomprijs (€0,28-0,35/kWh inclusief belasting) en tel daar €0,05-0,10/kWh bovenop. Voor zonnepaneel-bezitters die overdag overschot hebben, kun je scherper inzetten. Twijfel je? Kies een instaptarief van €0,30/kWh."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Waarom rekent Pluggo een servicefee terwijl andere platforms 'gratis' zijn?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Omdat Pluggo de hele transactie zélf afhandelt — PSD2-betaling via Stripe, uitbetaling op jouw IBAN, self-billing en KOR-administratie, en bemiddeling bij geschillen. Die infrastructuur financieren we transparant met €0,03/kWh per kant. 'Gratis' platforms zitten zelf niet in de geldstroom en laten de afrekening lopen via dure backoffices en laadpas-providers — bij elkaar al snel €0,15-0,25/kWh."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat houd ik netto over via Pluggo vergeleken met een commercieel laadnetwerk?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Stel een publiek laadtarief van €0,40/kWh. Via een commercieel laadnetwerk houd je ongeveer €0,20/kWh over plus maandabonnement. Via Pluggo ontvang je €0,34/kWh op je IBAN — ruim €0,14/kWh meer, zonder maandkosten. Voor een paal die 8.000 kWh per jaar deelt, scheelt dat ruim €1.100 per jaar extra."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Hoe werkt betalen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Pluggo werkt op basis van werkelijk afgenomen kWh: na de laadbeurt vult de eigenaar in hoeveel je hebt geladen, en daarna ontvang je een betaalverzoek voor het exacte bedrag. Afrekenen via Stripe met iDEAL, creditcard of Apple/Google Pay. Onder 10 kWh komt er €0,40 transactiefee bij; vanaf 10 kWh alleen het kWh-tarief."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat als de boeker niet betaalt?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Dat risico is klein. Pluggo werkt via Stripe (PSD2-compliant): direct nadat jij het kWh-aantal hebt ingevuld, gaat het betaalverzoek naar de boeker. Bij iDEAL is het bedrag direct overgeboekt, bij kaart-betaling direct geautoriseerd. Lukt een betaling niet, dan kan de boeker geen nieuwe boekingen maken tot het is opgelost en stapt Pluggo in."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Mag ik meedoen als ik huur of in een VvE woon?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja, mits je toestemming hebt. Huur je? Vraag even na bij je verhuurder. Woon je in een VvE? Dan moet je doorgaans de toestemming van het bestuur of de ledenvergadering hebben. Bij een eigen oprit of vrijstaand huis is dit meestal geen issue."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Moet ik belasting betalen over wat ik verdien?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja — inkomsten via Pluggo zijn belastbaar. Meestal valt dit onder 'resultaat uit overige werkzaamheden' in Box 1. Voor BTW geldt de Kleineondernemersregeling (KOR): bij omzet onder €20.000/jaar hoef je geen BTW te rekenen of af te dragen. Pluggo geeft je een transactie-overzicht voor je administratie."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Heb ik zonnepanelen nodig om mee te doen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Nee — Pluggo werkt met of zonder zonnepanelen. Maar áls je zonnepanelen hebt, is geld verdienen met zonnepanelen via je laadpaal nu een van de slimste opties. Door de afbouw van saldering en terugleverboetes wordt je terugleververgoeding richting €0,05-0,10/kWh. Via Pluggo verkoop je je zonnestroom-overschot aan een buur voor €0,25-0,30/kWh — €300-1.000+ per jaar extra."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat betekent het einde van de salderingsregeling voor mijn zonnepanelen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "De salderingsregeling wordt vanaf 2027 stapsgewijs afgebouwd en in 2031 volledig stopgezet. Daarna krijg je voor teruggeleverde stroom alleen nog de marktprijs (€0,05-0,10/kWh) in plaats van het leveringstarief (€0,30+/kWh). Pluggo biedt een alternatief: verkoop je overschot voor €0,25-0,30/kWh aan een buur die zijn EV oplaadt."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat kost het voor laders?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Je betaalt het tarief dat de eigenaar instelt plus een vaste servicefee van €0,03/kWh van Pluggo. Onder 10 kWh komt er €0,40 transactiefee bij. In de praktijk vaak 15-30% goedkoper dan een publieke laadpaal in de stad, zonder zoek- en wachttijd, en zonder abonnement of laadpas."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Werkt Pluggo op alle laadpalen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "In de basis ja — elke privélaadpaal met Type 2-aansluiting kan op Pluggo. Geen smart paal, OCPP of backoffice-abonnement nodig. We werken met Alfen, Wallbox, Easee, EVBox, Heidelberg en alle andere gangbare merken. Wat de paal wél moet kunnen: vrij-laden modus, zodat de boeker zelf kan starten."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat als ik niet thuis ben tijdens een laadbeurt?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Helemaal niet erg — Pluggo is contactloos opgezet. Zolang je paal in vrij-laden modus staat, kan de boeker zelf inpluggen zonder dat jij erbij hoeft te zijn. Na de laadbeurt vul je het kWh in de app in en Pluggo regelt het betaalverzoek. Je hoeft de boeker nooit te spreken."
+            }
+          }
+        ]
       }
     ]
   }
@@ -1022,9 +1140,15 @@
       </details>
 
       <details>
+        <summary>Hoe weet ik wat een eerlijke prijs is voor mijn paal?</summary>
+        <p>Een goede vuistregel: neem je eigen kale stroomprijs (bij een vast leveringscontract meestal €0,28-0,35/kWh inclusief belasting; variabel ligt soms lager) en tel daar €0,05-0,10/kWh bovenop als vergoeding voor het delen. Voor zonnepaneel-bezitters die overdag overschot hebben, kun je in de zonneuren juist scherper inzetten — die kWh kost je effectief alleen je gederfde terugleververgoeding (~€0,05-0,15/kWh) en alles daarboven is winst. Pluggo laat je in de app verschillende tarieven instellen voor verschillende tijdvakken, zodat je 's nachts of overdag kunt variëren.</p>
+        <p>Twijfel je? Kies dan een instaptarief van €0,30/kWh — daarmee zit je vrijwel altijd onder een publieke paal en houd je een fatsoenlijke marge over. Je kunt je tarief op elk moment aanpassen in de app.</p>
+      </details>
+
+      <details>
         <summary>Waarom rekent Pluggo een servicefee terwijl andere platforms 'gratis' zijn?</summary>
-        <p>Omdat Pluggo de hele transactie zélf afhandelt. Wij regelen de PSD2-compliante betaling via Stripe, de uitbetaling op jouw IBAN, de self-billing en KOR-administratie voor particuliere paaleigenaren, en bemiddeling bij geschillen. Die infrastructuur kost geld, en die financieren we transparant met €0,03/kWh per kant — inclusief de transactiekosten van Stripe (iDEAL, creditcard, Apple/Google Pay), die volledig door Pluggo gedragen worden. Geen abonnement, geen verborgen marges, geen toeslagen die er later bij komen.</p>
-        <p>Andere platforms die niets rekenen, zitten meestal niet zelf in de geldstroom. Zij laten de afrekening over aan jouw bestaande laadpaal-backoffice (zoals Allego, Vandebron of ChargeNet) en aan de laadpas-provider van de boeker (zoals Shell Recharge, Eneco of NewMotion). Die partijen <em>zijn</em> niet gratis: een backoffice rekent meestal €5-15 maandabonnement plus €0,02-0,05/kWh, en de laadpas-provider zet bovenop jouw paaltarief een markup van €0,10-0,20/kWh die naar hén gaat. Bij elkaar al snel €0,15-0,25/kWh die niet terugkomt bij jou of de boeker. Pluggo's €0,03/kWh per kant is daarmee in vrijwel alle gevallen voordeliger dan een 'gratis' tussenpartij die niet in de transactie zit.</p>
+        <p>Omdat Pluggo de hele transactie zélf afhandelt — PSD2-betaling via Stripe, uitbetaling op jouw IBAN, self-billing en KOR-administratie voor particulieren, en bemiddeling bij geschillen. Die infrastructuur financieren we transparant met €0,03/kWh per kant, inclusief alle Stripe-transactiekosten. Geen abonnement, geen verborgen marges.</p>
+        <p>"Gratis" platforms zitten meestal zélf niet in de geldstroom: zij laten de afrekening lopen via je bestaande laadpaal-backoffice (zoals Allego, Vandebron of ChargeNet) plus de laadpas-provider van de boeker (zoals Shell Recharge, Eneco of NewMotion). Een backoffice rekent doorgaans €5-15 per maand plus €0,02-0,05/kWh; de laadpas-provider zet €0,10-0,20/kWh markup bovenop jouw tarief. Bij elkaar €0,15-0,25/kWh die niet terugkomt bij jou of de boeker — vrijwel altijd duurder dan Pluggo's €0,03/kWh per kant.</p>
       </details>
 
       <details>
@@ -1042,6 +1166,12 @@
       </details>
 
       <details>
+        <summary>Wat als de boeker niet betaalt?</summary>
+        <p>Dat risico is klein. Pluggo werkt via Stripe (PSD2-compliant): direct nadat jij het afgenomen kWh-aantal hebt ingevuld, gaat een betaalverzoek naar de boeker. Hij rekent af via iDEAL (direct overgeboekt), creditcard of Apple/Google Pay (direct geautoriseerd). Geen klassieke factuur die je achteraf moet incasseren — de betaling is rond vóór jouw uitbetaling op gang komt.</p>
+        <p>Lukt een betaling om wat voor reden dan ook niet (storno, geweigerde kaart, etc.), dan kan de boeker geen nieuwe boekingen maken tot het is opgelost, en stapt Pluggo in om mee te kijken. Jouw uitbetaling volgt zodra Stripe de transactie heeft afgerond — meestal binnen één tot drie werkdagen op je IBAN.</p>
+      </details>
+
+      <details>
         <summary>Mag ik meedoen als ik huur of in een VvE woon?</summary>
         <p>Ja, mits je toestemming hebt. <strong>Huur je?</strong> Vraag even na bij je verhuurder of het oké is dat je je laadpaal via Pluggo aanbiedt — zeker als de paal aan een gedeelde muur, in een gedeelde parkeerruimte of op grond van de verhuurder zit. <strong>Woon je in een VvE</strong> (appartement met gedeelde parkeergarage of -terrein)? Dan moet je doorgaans de toestemming van het bestuur of de ledenvergadering hebben. Bij een eigen oprit of vrijstaand huis is dit meestal geen issue. In de praktijk is een korte mail naar je verhuurder of VvE-bestuur vaak genoeg om het netjes vast te leggen.</p>
       </details>
@@ -1053,7 +1183,14 @@
 
       <details>
         <summary>Heb ik zonnepanelen nodig om mee te doen?</summary>
-        <p>Nee. Pluggo werkt met of zonder zonnepanelen. Maar áls je panelen hebt, is Pluggo extra interessant: door de afbouw van saldering en de terugleverboetes wordt je overschot bij je leverancier steeds minder waard. Via Pluggo verkoop je dezelfde kWh aan een buur — een stuk gunstiger dan terugleveren.</p>
+        <p>Nee — Pluggo werkt met of zonder zonnepanelen. Maar áls je zonnepanelen hebt, is geld verdienen met zonnepanelen via je laadpaal op dit moment een van de slimste opties die er is. Door de afbouw van de salderingsregeling en de terugleverboetes die steeds meer energieleveranciers invoeren, wordt je terugleververgoeding richting €0,05-0,10/kWh — terwijl je dezelfde stroom zelf inkocht voor €0,30+/kWh.</p>
+        <p>Via Pluggo verkoop je je zonnestroom-overschot rechtstreeks aan een buur die zijn EV oplaadt, voor pak 'm beet €0,25-0,30/kWh. Voor een gemiddelde installatie van tien panelen (~3.500 kWh per jaar, waarvan zo'n 1.500 kWh overschot) levert dat tussen de €300 en €450 per jaar extra op, vergeleken met terugleveren aan je leverancier. Bij een grotere installatie met veel overschot kan dat oplopen tot €1.000+ per jaar — geld dat je anders gewoon kwijtraakt aan de afbouw van saldering.</p>
+      </details>
+
+      <details>
+        <summary>Wat betekent het einde van de salderingsregeling voor mijn zonnepanelen?</summary>
+        <p>De salderingsregeling — waarbij stroom die je teruglevert 1-op-1 verrekend werd met je eigen verbruik — wordt vanaf 2027 stapsgewijs afgebouwd en in 2031 volledig stopgezet. Daarna krijg je voor teruggeleverde stroom alleen nog de marktprijs (nu ongeveer €0,05-0,10/kWh) in plaats van het leveringstarief (€0,30+/kWh). Veel leveranciers rekenen daarnaast nu al een terugleverboete: tot €30-€50 per maand extra voor klanten die veel terugleveren.</p>
+        <p>Voor zonnepaneel-bezitters betekent dit dat je terugverdientijd langer wordt — tenzij je je overschot anders besteedt. Pluggo biedt precies die andere bestemming: in plaats van je overschot voor enkele centen aan je leverancier terug te geven, verkoop je het voor €0,25-0,30/kWh aan een buur die zijn EV oplaadt. Daarmee maak je je panelen weer rendabel, óók na 2027.</p>
       </details>
 
       <details>
@@ -1064,7 +1201,7 @@
 
       <details>
         <summary>Wat kost het voor laders?</summary>
-        <p>Je betaalt het tarief dat de eigenaar instelt, plus een vaste servicefee van €0,03 per kWh van Pluggo. Voor sessies onder 10 kWh komt daar een eenmalige €0,40 transactiefee bij om de iDEAL-kosten te dekken; bij sessies vanaf 10 kWh vervalt die fee. De all-in prijs zie je direct in de app voordat je boekt, dus geen verrassingen. In de praktijk vaak nog steeds 25–45% goedkoper dan een commerciële snellader, zonder zoek- en wachttijd, en zonder abonnement of laadpas.</p>
+        <p>Je betaalt het tarief dat de eigenaar instelt, plus een vaste servicefee van €0,03 per kWh van Pluggo. Voor sessies onder 10 kWh komt daar een eenmalige €0,40 transactiefee bij om de iDEAL-kosten te dekken; bij sessies vanaf 10 kWh vervalt die fee. De all-in prijs zie je direct in de app voordat je boekt, dus geen verrassingen. In de praktijk vaak nog 15–30% goedkoper dan een publieke laadpaal in de stad, zonder zoek- en wachttijd, en zonder abonnement of laadpas.</p>
       </details>
 
       <details>
@@ -1074,7 +1211,8 @@
 
       <details>
         <summary>Werkt Pluggo op alle laadpalen?</summary>
-        <p>In de basis, ja — elke privélaadpaal met een Type 2-aansluiting (de standaard in Europa) kan op Pluggo. Je hoeft geen "smart" paal te hebben; de boekingen lopen via de app, niet via de paal zelf.</p>
+        <p>In de basis, ja — elke privélaadpaal met een Type 2-aansluiting (de standaard in Europa) kan op Pluggo. Je hoeft geen "smart" paal te hebben, geen OCPP-koppeling, geen backoffice-abonnement: de boekingen lopen via onze app, niet via de paal zelf. We werken met merken als Alfen, Wallbox, Easee, EVBox, Heidelberg, Schneider en alle andere gangbare thuis-laadpalen.</p>
+        <p>Wat de paal wél moet kunnen: <strong>vrij-laden modus</strong>, zodat de boeker kan starten zonder dat hij jouw laadpas of app nodig heeft. Hoe je dat per merk instelt, zie je verderop in deze FAQ. Heb je een paal die alleen via een specifieke laadpas-provider werkt en die je niet kunt overzetten naar vrij-laden? Mail ons op <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a> — we kijken graag mee of er een workaround is.</p>
       </details>
 
       <details>
@@ -1095,6 +1233,11 @@
           <li><strong>Heidelberg / Schneider / overige</strong> — meestal via een DIP-switch in de paal of via je installateur</li>
         </ul>
         <p>Twijfel je? Bel je installateur of mail ons op <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a> — we helpen je op weg.</p>
+      </details>
+
+      <details>
+        <summary>Wat als ik niet thuis ben tijdens een laadbeurt?</summary>
+        <p>Helemaal niet erg — Pluggo is bewust contactloos opgezet. Zolang je paal in vrij-laden modus staat, kan de boeker zelf inpluggen op het afgesproken tijdslot zonder dat jij erbij hoeft te zijn. Na de laadbeurt vul je in de app het werkelijk afgenomen kWh in (af te lezen van je paal of je energieapp), en Pluggo stuurt de boeker automatisch een betaalverzoek. De betaling landt vervolgens binnen één tot drie werkdagen op je IBAN. Je hoeft niet thuis te zijn, niet open te doen, en de boeker en jij hoeven elkaar nooit te spreken.</p>
       </details>
 
       <details>
