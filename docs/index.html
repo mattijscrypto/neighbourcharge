@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Laadpaal delen met de buurt — Pluggo | P2P laadnetwerk NL</title>
-  <meta name="description" content="Laadpaal delen met je buurt — verdien aan je privélaadpaal of vind goedkoop laden in de buurt. App + boekingen live vanaf 7 juli 2026 in App Store en Google Play." />
+  <meta name="description" content="Laadpaal delen met je buurt — verdien aan je privélaadpaal of vind goedkoop laden in de buurt. App nu live in App Store en Google Play, boekingen door rijders openen 7 juli 2026." />
   <meta property="og:title" content="Laadpaal delen met de buurt — Pluggo" />
-  <meta property="og:description" content="Verdien aan je privélaadpaal of vind goedkoop laden om de hoek. App + boekingen live vanaf 7 juli 2026." />
+  <meta property="og:description" content="Verdien aan je privélaadpaal of vind goedkoop laden om de hoek. App nu in App Store &amp; Google Play — boekingen openen 7 juli 2026." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://pluggoapp.nl" />
   <meta property="og:site_name" content="Pluggo" />
@@ -79,7 +79,7 @@
             "name": "Wanneer gaat de app live?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Op 7 juli 2026 staat de Pluggo-app in de Apple App Store en Google Play Store, en openen de boekingen tegelijk landelijk. Vanaf die dag kun je de app downloaden, een account aanmaken, je laadpaal toevoegen én — als EV-rijder — bij andere palen in heel Nederland terecht."
+              "text": "De Pluggo-app staat nu in de Apple App Store en Google Play Store. Je kunt 'm vandaag downloaden, een account aanmaken en — als paaleigenaar — meteen je paal toevoegen. Boekingen door rijders openen landelijk op 7 juli 2026. Paaleigenaren die nu hun paal toevoegen krijgen postcode-voorrang in de zoekresultaten zodra boekingen openen."
             }
           },
           {
@@ -361,6 +361,52 @@
       border-color: var(--border);
     }
     .btn-secondary:hover { border-color: var(--primary); }
+
+    /* ---------- STORE BADGES ---------- */
+    .store-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .btn-store {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 22px;
+      border-radius: 12px;
+      text-decoration: none;
+      background: #000;
+      color: white;
+      border: 1px solid #000;
+      transition: transform 0.15s, opacity 0.15s;
+      min-width: 200px;
+      justify-content: flex-start;
+    }
+    .btn-store:hover { transform: translateY(-1px); opacity: 0.88; }
+    .btn-store .store-icon { font-size: 26px; line-height: 1; }
+    .btn-store .store-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+      text-align: left;
+    }
+    .btn-store .store-text .small {
+      font-size: 11px;
+      font-weight: 400;
+      opacity: 0.85;
+      letter-spacing: 0.3px;
+    }
+    .btn-store .store-text .big {
+      font-size: 17px;
+      font-weight: 600;
+    }
+    .final-cta .btn-store {
+      background: white;
+      color: #000;
+      border-color: white;
+    }
 
     /* ---------- COUNTDOWN ---------- */
     .countdown-wrap {
@@ -839,7 +885,7 @@
   <header class="hero">
     <div class="badge">
       <span class="dot"></span>
-      Launch op 7 juli 2026 — App Store, Play Store &amp; boekingen tegelijk
+      App nu live · Boekingen open 7 juli 2026
     </div>
     <h1>Laadpaal delen.<br/><span class="highlight">Het laadnet van de buurt zelf.</span></h1>
     <p class="lead">
@@ -850,12 +896,30 @@
       <a href="/pioniers" class="btn btn-primary">Word Pluggo Pionier — eerste 100</a>
       <a href="#hoe-werkt-het" class="btn btn-secondary">Hoe werkt het?</a>
     </div>
-    <p style="margin: -28px auto 32px; font-size: 13px; color: var(--muted); max-width: 460px;">
-      De app is nog niet beschikbaar in de stores. Vanaf <strong>7 juli 2026</strong> downloadbaar in App Store &amp; Google Play — boekingen direct open vanaf launch.
+
+    <div class="store-row">
+      <a href="https://apps.apple.com/nl/app/pluggo/id6764389850" class="btn-store" target="_blank" rel="noopener" aria-label="Download Pluggo in de App Store">
+        <span class="store-icon" aria-hidden="true">&#63743;</span>
+        <span class="store-text">
+          <span class="small">Download in de</span>
+          <span class="big">App Store</span>
+        </span>
+      </a>
+      <a href="https://play.google.com/store/apps/details?id=nl.pluggoapp.pluggo" class="btn-store" target="_blank" rel="noopener" aria-label="Pluggo in Google Play">
+        <span class="store-icon" aria-hidden="true">&#9658;</span>
+        <span class="store-text">
+          <span class="small">Beschikbaar op</span>
+          <span class="big">Google Play</span>
+        </span>
+      </a>
+    </div>
+
+    <p style="margin: 0 auto 32px; font-size: 13px; color: var(--muted); max-width: 480px;">
+      <strong>App is nu live.</strong> Voeg vandaag al je laadpaal toe — pioniers krijgen postcode-voorrang in de zoekresultaten zodra boekingen door rijders openen op <strong>7 juli 2026</strong>.
     </p>
 
     <div class="countdown-wrap">
-      <div class="countdown-eyebrow">Tot de Pluggo launch — app + boekingen live</div>
+      <div class="countdown-eyebrow">Tot boekingen door rijders openen</div>
       <div class="countdown" id="countdown">
         <div class="countdown-item">
           <span class="countdown-num" id="cd-days">—</span>
@@ -874,7 +938,7 @@
           <span class="countdown-label">Sec</span>
         </div>
       </div>
-      <div class="countdown-foot">App live in App Store &amp; Play Store op 7 juli 2026 — boekingen openen tegelijkertijd landelijk.</div>
+      <div class="countdown-foot">App is nu al in App Store &amp; Play Store. Op <strong>7 juli 2026</strong> openen boekingen door rijders — pioniers met postcode-voorrang.</div>
     </div>
   </header>
 
@@ -1131,7 +1195,7 @@
 
       <details>
         <summary>Wanneer gaat de app live?</summary>
-        <p>Op <strong>7 juli 2026</strong> staat de Pluggo-app in de Apple App Store en Google Play Store, en openen de boekingen tegelijk landelijk. Vanaf die dag kun je de app downloaden, een account aanmaken, je laadpaal toevoegen én — als EV-rijder — bij andere palen in heel Nederland terecht.</p>
+        <p>De Pluggo-app staat <strong>nu</strong> in de Apple App Store en Google Play Store. Je kunt 'm vandaag downloaden, een account aanmaken en — als paaleigenaar — meteen je paal toevoegen. <strong>Boekingen door rijders openen landelijk op 7 juli 2026.</strong> Paaleigenaren die nu hun paal toevoegen krijgen postcode-voorrang in de zoekresultaten zodra boekingen openen.</p>
       </details>
 
       <details>
@@ -1269,14 +1333,29 @@
   <section class="final-cta" id="meedoen">
     <h2>Doe vanaf het begin mee.</h2>
     <p>
-      De Pluggo-app staat <strong>vanaf 7 juli 2026</strong> in de Apple App Store en Google Play Store — en op diezelfde dag openen de boekingen landelijk. Hoe meer palen er op launch-dag op de kaart staan, hoe sterker we starten.
+      De Pluggo-app staat <strong>nu</strong> in de Apple App Store en Google Play Store. Download 'm vandaag en voeg je paal toe — boekingen door rijders openen landelijk op <strong>7 juli 2026</strong>. Hoe meer palen er op die dag op de kaart staan, hoe sterker we starten.
     </p>
     <div class="cta-row">
       <a href="/pioniers" class="btn btn-primary">Word Pionier — eerste 100 paaleigenaren</a>
-      <a href="#" class="btn btn-secondary" aria-disabled="true" style="opacity: 0.65; cursor: not-allowed;">Download in App Store — vanaf 7 juli</a>
     </div>
-    <p style="margin-top: 24px; font-size: 14px; opacity: 0.85;">
-      <strong style="color: white;">De app is nog niet beschikbaar in de stores.</strong> Tot 7 juli 2026: mail <a href="mailto:info@pluggoapp.nl" style="color: white;">info@pluggoapp.nl</a> en we sturen je op launch-dag een seintje zodra de app live staat.
+    <div class="store-row">
+      <a href="https://apps.apple.com/nl/app/pluggo/id6764389850" class="btn-store" target="_blank" rel="noopener" aria-label="Download Pluggo in de App Store">
+        <span class="store-icon" aria-hidden="true">&#63743;</span>
+        <span class="store-text">
+          <span class="small">Download in de</span>
+          <span class="big">App Store</span>
+        </span>
+      </a>
+      <a href="https://play.google.com/store/apps/details?id=nl.pluggoapp.pluggo" class="btn-store" target="_blank" rel="noopener" aria-label="Pluggo in Google Play">
+        <span class="store-icon" aria-hidden="true">&#9658;</span>
+        <span class="store-text">
+          <span class="small">Beschikbaar op</span>
+          <span class="big">Google Play</span>
+        </span>
+      </a>
+    </div>
+    <p style="margin-top: 12px; font-size: 14px; opacity: 0.85;">
+      Pioniers krijgen postcode-voorrang in de zoekresultaten zodra boekingen op 7 juli openen. Vragen? Mail <a href="mailto:info@pluggoapp.nl" style="color: white;">info@pluggoapp.nl</a>.
     </p>
   </section>
 
