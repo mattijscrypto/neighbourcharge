@@ -890,9 +890,33 @@
       color: var(--text);
       border-bottom: 1px dashed rgba(0,0,0,0.06);
       line-height: 1.4;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
     }
     .compare-list li:last-child {
       border-bottom: none;
+    }
+    .compare-amount {
+      font-weight: 700;
+      color: var(--muted);
+      font-size: 14px;
+      white-space: nowrap;
+      letter-spacing: -0.01em;
+    }
+    .compare-card--public .compare-amount {
+      color: #8B6B4F;
+    }
+    .compare-card--pluggo .compare-amount {
+      color: var(--primary-dark);
+    }
+    .compare-list-footnote {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--muted);
+      font-style: italic;
+      line-height: 1.4;
     }
     .compare-card--public .compare-list li::before {
       content: "−";
@@ -1073,23 +1097,25 @@
           <div class="compare-headline">€0,55 – €0,75<span class="kwh">/ kWh</span></div>
           <div class="compare-sub">Verdeeld over al deze partijen:</div>
           <ul class="compare-list">
-            <li>Stroom-inkoop bij energieleverancier</li>
-            <li>Netwerk-transport door netbeheerder</li>
-            <li>Marge voor de paalbeheerder (CPO)</li>
-            <li>Marge voor de laadpas-aanbieder (MSP)</li>
-            <li>BTW over alle margelagen</li>
+            <li><span>Stroom-inkoop bij energieleverancier</span><span class="compare-amount">€0,10 – €0,15</span></li>
+            <li><span>Netwerk-transport (netbeheerder)</span><span class="compare-amount">€0,05 – €0,08</span></li>
+            <li><span>Marge paalbeheerder (CPO)</span><span class="compare-amount">€0,10 – €0,15</span></li>
+            <li><span>Marge laadpas-aanbieder (MSP)</span><span class="compare-amount">€0,05 – €0,10</span></li>
+            <li><span>BTW (21%) over alles</span><span class="compare-amount">€0,10 – €0,15</span></li>
           </ul>
+          <p class="compare-list-footnote">Indicatieve bedragen op basis van markttarieven 2026. CPO + MSP samen — de twee margelagen die Pluggo wegsnijdt — komen al gauw op €0,15 – €0,25/kWh.</p>
         </div>
         <div class="card compare-card compare-card--pluggo">
           <div class="compare-tag">Pluggo</div>
           <div class="compare-headline">€0,28 – €0,38<span class="kwh">/ kWh</span></div>
           <div class="compare-sub">Verdeeld over slechts:</div>
           <ul class="compare-list">
-            <li>De stroom zelf (vaak ook nog van zonnepanelen)</li>
-            <li>De paaleigenaar — die houdt het grootste deel</li>
-            <li>€0,03/kWh Pluggo-fee per kant (€0,06/kWh totaal) — voor Stripe + servers</li>
-            <li>Geen abonnement, geen verborgen kosten</li>
+            <li><span>Stroom (vaak van zonnepanelen)</span><span class="compare-amount">€0,15 – €0,22</span></li>
+            <li><span>De paaleigenaar — houdt het grootste deel</span><span class="compare-amount">€0,07 – €0,10</span></li>
+            <li><span>Pluggo-fee — €0,03 per kant</span><span class="compare-amount">€0,06 totaal</span></li>
+            <li><span>Geen abonnement, geen verborgen kosten</span><span class="compare-amount">€0,00</span></li>
           </ul>
+          <p class="compare-list-footnote">Paaleigenaar bepaalt zelf z'n tarief — bovenstaande is een typisch voorbeeld. KOR-regeling: geen BTW op particuliere paaleigenaren tot €20.000/jaar.</p>
         </div>
       </div>
 
