@@ -820,6 +820,123 @@
       border-color: rgba(255, 255, 255, 0.4);
     }
 
+    /* ---------- ANDERS / COMPARE ---------- */
+    .compare-grid {
+      margin-top: 28px;
+    }
+    .compare-card {
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .compare-card--public {
+      background: #FAF7F4;
+      border-color: #E8DDD0;
+    }
+    .compare-card--pluggo {
+      background: var(--primary-light);
+      border: 2px solid var(--primary);
+    }
+    .compare-tag {
+      display: inline-block;
+      align-self: flex-start;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+    .compare-card--public .compare-tag {
+      background: #E8DDD0;
+      color: #6B5340;
+    }
+    .compare-card--pluggo .compare-tag {
+      background: var(--primary);
+      color: white;
+    }
+    .compare-headline {
+      font-size: 34px;
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 4px;
+      line-height: 1.1;
+      letter-spacing: -0.5px;
+    }
+    .compare-headline .kwh {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-left: 6px;
+    }
+    .compare-card--pluggo .compare-headline {
+      color: var(--primary-dark);
+    }
+    .compare-sub {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    .compare-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .compare-list li {
+      position: relative;
+      padding: 8px 0 8px 24px;
+      font-size: 15px;
+      color: var(--text);
+      border-bottom: 1px dashed rgba(0,0,0,0.06);
+      line-height: 1.4;
+    }
+    .compare-list li:last-child {
+      border-bottom: none;
+    }
+    .compare-card--public .compare-list li::before {
+      content: "−";
+      position: absolute;
+      left: 0;
+      top: 6px;
+      color: #B8896F;
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .compare-card--pluggo .compare-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      color: var(--primary);
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .anders-note {
+      margin-top: 32px;
+      padding: 24px 28px;
+      background: white;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--primary);
+      border-radius: 12px;
+    }
+    .anders-note p {
+      margin: 0;
+      font-size: 15px;
+      color: var(--text);
+      line-height: 1.65;
+    }
+    .anders-note p + p {
+      margin-top: 14px;
+    }
+    .anders-fee-note {
+      font-size: 14px !important;
+      color: var(--muted) !important;
+    }
+    .anders-fee-note strong {
+      color: var(--primary-dark);
+    }
+
     /* ---------- FOOTER ---------- */
     footer.site {
       background: #0F1411;
@@ -941,6 +1058,51 @@
       <div class="countdown-foot">App is nu al in App Store &amp; Play Store. Op <strong>7 juli 2026</strong> openen boekingen door rijders — pioniers met postcode-voorrang.</div>
     </div>
   </header>
+
+  <section id="anders">
+    <div class="section-inner section-narrow">
+      <div class="eyebrow">Waarom Pluggo anders is</div>
+      <h2>Tot <span class="highlight">50% goedkoper</span> dan een publieke paal — en hier is waarom.</h2>
+      <p class="section-lead">
+        Bij een gewone publieke laadpaal zit er een hele rij bedrijven tussen jou en de stroom. Elk pakt z'n marge. Pluggo snijdt die hele tussenlaag weg — je laadt direct bij iemand thuis, betaalt direct via de app, klaar.
+      </p>
+
+      <div class="grid-2 compare-grid">
+        <div class="card compare-card compare-card--public">
+          <div class="compare-tag">Publieke paal</div>
+          <div class="compare-headline">€0,55 – €0,75<span class="kwh">/ kWh</span></div>
+          <div class="compare-sub">Verdeeld over al deze partijen:</div>
+          <ul class="compare-list">
+            <li>Stroom-inkoop bij energieleverancier</li>
+            <li>Netwerk-transport door netbeheerder</li>
+            <li>Marge voor de paalbeheerder (CPO)</li>
+            <li>Marge voor de laadpas-aanbieder (MSP)</li>
+            <li>BTW over alle margelagen</li>
+          </ul>
+        </div>
+        <div class="card compare-card compare-card--pluggo">
+          <div class="compare-tag">Pluggo</div>
+          <div class="compare-headline">€0,28 – €0,38<span class="kwh">/ kWh</span></div>
+          <div class="compare-sub">Verdeeld over slechts:</div>
+          <ul class="compare-list">
+            <li>De stroom zelf (vaak ook nog van zonnepanelen)</li>
+            <li>De paaleigenaar — die houdt het grootste deel</li>
+            <li>€0,03/kWh Pluggo-fee per kant (€0,06/kWh totaal) — voor Stripe + servers</li>
+            <li>Geen abonnement, geen verborgen kosten</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="anders-note">
+        <p>
+          <strong>En de andere "deelplatformen" die je tegenkomt?</strong> Die zetten palen op de kaart, maar laten de betaling lopen via het bestaande laadpas-systeem — dus de hele marge-laag blijft er gewoon staan. Wij doen het hele proces zelf, rechtstreeks tussen paaleigenaar en rijder via Stripe. Daarom kunnen wij die laag weghalen.
+        </p>
+        <p class="anders-fee-note">
+          Onze fee is <strong>€0,03/kWh van de paaleigenaar + €0,03/kWh van de rijder = €0,06/kWh in totaal</strong>. Daarmee betalen we de Stripe-betaalkosten en houden we Pluggo draaiend. Niet meer, niet minder. Geen abonnementen, geen verborgen kosten, geen aandeelhouders die ook nog wat willen.
+        </p>
+      </div>
+    </div>
+  </section>
 
   <section class="alt-bg" id="verhaal">
     <div class="section-inner section-narrow">
