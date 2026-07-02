@@ -769,13 +769,34 @@
   </footer>
 
   <script>
-    // Pioneer counter — placeholder until backend is connected.
-    // After 7 July 2026 this will read live from Supabase via a small JSON endpoint.
-    (function () {
+    // Pluggo Pionier-teller — live vanuit Supabase.
+    // Leest de publieke view `pioneer_public_count` (migratie 0019) via
+    // PostgREST met de anon (publishable) key. De view retourneert alleen
+    // een aggregaat count, dus er lekt geen identificeerbare data.
+    (async function () {
       var el = document.getElementById('pioneer-count');
       if (!el) return;
-      // Static placeholder for now (telling start op 7 juli)
-      el.textContent = '0';
+      var SUPABASE_URL = 'https://vfqpijlicngnomrsasvf.supabase.co';
+      var SUPABASE_ANON = 'sb_publishable_6LYdmmkM6efPz5WJzi5tiQ_0qiXqML1';
+      try {
+        var res = await fetch(
+          SUPABASE_URL + '/rest/v1/pioneer_public_count?select=pioneer_count',
+          {
+            headers: {
+              apikey: SUPABASE_ANON,
+              Authorization: 'Bearer ' + SUPABASE_ANON
+            }
+          }
+        );
+        if (!res.ok) return; // laat de '0' staan bij een fout
+        var rows = await res.json();
+        var count = (rows && rows[0] && typeof rows[0].pioneer_count === 'number')
+          ? rows[0].pioneer_count
+          : 0;
+        el.textContent = String(count);
+      } catch (_) {
+        // Netwerkfout — behoud de '0' die er al staat
+      }
     })();
   </script>
 </body>
