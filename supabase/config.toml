@@ -34,3 +34,14 @@ verify_jwt = false
 # is onze tussenstop. Pure 302 redirect, geen DB-toegang, geen state.
 [functions.stripe-onboarding-return]
 verify_jwt = false
+
+# stripe-refresh-account draait in twee modi:
+#   • normale user-modus: Flutter stuurt user-JWT, onze code roept
+#     auth.getUser() aan om te verifiëren
+#   • admin-modus: bash-script stuurt sb_secret service-role key als Bearer,
+#     onze code vergelijkt hem 1-op-1 met SUPABASE_SERVICE_ROLE_KEY
+# Supabase's gateway kan de nieuwe sb_secret_-format niet als JWT parsen,
+# dus we zetten hier verify_jwt uit. Authenticiteit blijft dubbel geborgd
+# in onze eigen edge-function-code.
+[functions.stripe-refresh-account]
+verify_jwt = false
