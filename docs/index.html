@@ -180,6 +180,14 @@
           },
           {
             "@type": "Question",
+            "name": "Werkt míjn laadpaal op Pluggo?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Verreweg de meeste thuis-laadpalen werken direct — soms na één setting omzetten. Simpele check: ben jij de administratieve eigenaar van de paal, kun je zelf via een merk-app (myWallbox, Alfen, Easee, Tesla, etc.) instellingen aanpassen? Zo ja, dan is de kans heel groot dat je paal geschikt is. Alleen twee categorieën vallen echt af: lease-palen van je werkgever of leasemaatschappij (hardgekoppeld aan een backoffice als E-Flux, Shell Recharge, Vattenfall InCharge) en Eichrecht-gecertificeerde zakelijke palen (kom je zelden thuis tegen). Op pluggoapp.nl/welke-laadpaal-werkt.html vind je de check in 3 vragen plus stap-voor-stap instructies per merk."
+            }
+          },
+          {
+            "@type": "Question",
             "name": "Wat als ik niet thuis ben tijdens een laadbeurt?",
             "acceptedAnswer": {
               "@type": "Answer",
@@ -961,6 +969,75 @@
       color: var(--primary-dark);
     }
 
+    /* ---------- WAT IS PLUGGO / WEL-NIET ---------- */
+    .wel-niet-grid {
+      margin-top: 28px;
+    }
+    .wel-card {
+      background: var(--primary-light);
+      border: 2px solid var(--primary);
+    }
+    .niet-card {
+      background: #FAF7F4;
+      border-color: #E8DDD0;
+    }
+    .wel-niet-tag {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 6px 14px;
+      border-radius: 999px;
+      margin-bottom: 18px;
+    }
+    .wel-card .wel-niet-tag {
+      background: var(--primary);
+      color: white;
+    }
+    .niet-card .wel-niet-tag {
+      background: #E8DDD0;
+      color: #6B5340;
+    }
+    .wel-niet-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .wel-niet-list li {
+      position: relative;
+      padding: 10px 0 10px 26px;
+      font-size: 15px;
+      color: var(--text);
+      line-height: 1.55;
+      border-bottom: 1px dashed rgba(0,0,0,0.07);
+    }
+    .wel-niet-list li:last-child {
+      border-bottom: none;
+    }
+    .wel-card .wel-niet-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .niet-card .wel-niet-list li::before {
+      content: "✕";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      color: #B8896F;
+      font-weight: 800;
+      font-size: 14px;
+    }
+    .wel-niet-list li strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
     /* ---------- FOOTER ---------- */
     footer.site {
       background: #0F1411;
@@ -1015,10 +1092,9 @@
         <span class="name">Pluggo</span>
       </a>
       <div class="nav-links">
+        <a href="#wat-is-pluggo">Wat is Pluggo</a>
         <a href="#hoe-werkt-het">Hoe werkt het</a>
         <a href="#slim-laden">Slim laden</a>
-        <a href="#groene-transitie">Transitie</a>
-        <a href="#impact">Impact</a>
         <a href="#oprichter">Oprichter</a>
         <a href="#faq">FAQ</a>
         <a href="#meedoen" class="nav-cta">Doe mee</a>
@@ -1033,7 +1109,7 @@
     </div>
     <h1>Laadpaal delen.<br/><span class="highlight">Het laadnet van de buurt zelf.</span></h1>
     <p class="lead">
-      Pluggo is hét platform om je laadpaal te delen met de buurt. Buren met een privélaadpaal verdienen aan ongebruikte uren, buren zonder eigen paal vinden goedkoop laden om de hoek — samen benutten we de palen die er al staan.
+      Pluggo is een marktplaats waar buren hun eigen thuislaadpaal delen. Heb je een paal op je oprit? Zet 'm in de app, kies je prijs, laat buren zonder eigen paal er een tijdslot op boeken. Zij laden goedkoper dan bij een publieke paal, jij verdient aan de uren dat je paal toch stilstaat. Geen laadpas, geen abonnement, geen tussenpartij.
     </p>
 
     <div class="cta-row">
@@ -1086,6 +1162,41 @@
     </div>
   </header>
 
+  <section class="alt-bg" id="wat-is-pluggo">
+    <div class="section-inner section-narrow">
+      <div class="eyebrow">Wat is Pluggo eigenlijk?</div>
+      <h2>Één zin, en dan direct: wat is het <span class="highlight">wel</span>, wat is het <span class="highlight">niet</span>?</h2>
+      <p class="section-lead">
+        Pluggo is een marktplaats waar buren hun eigen thuislaadpaal delen — peer-to-peer, zoals Airbnb voor jouw laadpaal. Om verwarring te voorkomen zetten we hier op een rij wat we wel en niet doen.
+      </p>
+
+      <div class="grid-2 wel-niet-grid">
+        <div class="card wel-card">
+          <div class="wel-niet-tag">✅ Dit is Pluggo wél</div>
+          <ul class="wel-niet-list">
+            <li><strong>Een marktplaats</strong> voor privé-thuispalen — jij zet 'm op de kaart, buren boeken 'm.</li>
+            <li><strong>De paaleigenaar bepaalt alles zelf</strong>: prijs per kWh, beschikbaarheid, welke boekingen ie accepteert.</li>
+            <li><strong>Boekingen én betalingen lopen via de Pluggo-app</strong> (iDEAL, creditcard, Apple/Google Pay). Uitbetaling op je IBAN.</li>
+            <li><strong>Werkt met vrijwel alle thuispalen</strong> waar jij zelf de app-beheerder van bent: Wallbox, Alfen, Easee, EVBox, Heidelberg, Ratio, Schneider, Tesla Wall Connector, en de meeste andere OCPP-palen. → <a href="./welke-laadpaal-werkt.html">Check in 3 vragen of jouw paal geschikt is</a>.</li>
+            <li><strong>Servicefee: €0,03/kWh per kant</strong> (paaleigenaar én rijder), dus €0,06/kWh totaal. Geen abonnement, geen verborgen kosten.</li>
+            <li><strong>Contactloos</strong>: rijder gebruikt zijn eigen Type 2-kabel, jij hoeft er niet bij te zijn. Achteraf vul je het werkelijk afgenomen kWh in.</li>
+          </ul>
+        </div>
+        <div class="card niet-card">
+          <div class="wel-niet-tag">❌ Dit is Pluggo níét</div>
+          <ul class="wel-niet-list">
+            <li><strong>Geen laadpas of laadpas-abonnement.</strong> Je hoeft geen extra kaartje te dragen — de sessie loopt via de Pluggo-app op je telefoon.</li>
+            <li><strong>Geen publiek laadnetwerk.</strong> Wij zijn geen Allego, Vattenfall of Fastned. We hebben zelf geen palen — we ontsluiten die van jou en je buren.</li>
+            <li><strong>Geen paal-verkoper of installateur.</strong> Je moet zelf al een thuislaadpaal hebben (of buurman kennen die er één heeft) om mee te doen.</li>
+            <li><strong>Geen snellaadstation.</strong> Thuispalen laden via wisselstroom (Mode 3, Type 2), gemiddeld 11–22 kW — geen 150+ kW DC-snelladen zoals langs de snelweg.</li>
+            <li><strong>Geen automatische afrekening per aansluiting.</strong> De paaleigenaar vult ná de sessie het werkelijk geladen kWh in. Pas dán volgt een betaalverzoek.</li>
+            <li><strong>Nog geen verzekering bij schade.</strong> Op dit moment is elke boeking een uitleen-overeenkomst tussen twee particulieren. Aan een verzekeringslaag werken we voor een latere versie.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="anders">
     <div class="section-inner section-narrow">
       <div class="eyebrow">Waarom Pluggo anders is</div>
@@ -1128,6 +1239,9 @@
         </p>
         <p class="anders-fee-note">
           Onze fee is <strong>€0,03/kWh van de paaleigenaar + €0,03/kWh van de rijder = €0,06/kWh in totaal</strong>. Daarmee betalen we de Stripe-betaalkosten en houden we Pluggo draaiend. Niet meer, niet minder. Geen abonnementen, geen verborgen kosten, geen aandeelhouders die ook nog wat willen.
+        </p>
+        <p class="anders-fee-note">
+          → <a href="./goedkoop-laden.html">Gids: goedkoop elektrisch laden in de buurt vanaf €0,28/kWh — hoe het werkt, wat het bespaart, per stad</a>
         </p>
       </div>
     </div>
@@ -1190,9 +1304,9 @@
   <section class="alt-bg" id="hoe-werkt-het">
     <div class="section-inner">
       <div class="eyebrow">Hoe werkt het</div>
-      <h2>In drie stappen, voor beide kanten.</h2>
+      <h2>In vier stappen, voor beide kanten.</h2>
       <p class="section-lead">
-        Geen intermediair, geen abonnement — een eerlijke match in de buurt.
+        Geen intermediair, geen abonnement — een eerlijke match in de buurt, en contactloos afgehandeld.
       </p>
 
       <div class="how-grid">
@@ -1201,22 +1315,29 @@
           <div class="step">
             <div class="step-num">1</div>
             <div class="step-body">
-              <strong>Voeg je paal toe</strong>
-              <span>Adres, foto, prijs per kWh en instructies — klaar in een paar minuten.</span>
+              <strong>Voeg je paal toe & zet 'm op vrij-laden</strong>
+              <span>Adres, foto, laadvermogen, prijs per kWh — klaar in een paar minuten. Zet in de app van je paal-merk (Wallbox, Alfen, Easee, etc.) de vrij-laden modus aan zodat boekers zonder laadpas kunnen starten.</span>
             </div>
           </div>
           <div class="step">
             <div class="step-num">2</div>
             <div class="step-body">
               <strong>Stel je beschikbaarheid in</strong>
-              <span>Bepaal zelf wanneer je paal te boeken is.</span>
+              <span>Bepaal zelf welke tijdvakken je paal te boeken is — bijvoorbeeld alleen overdag, of alleen in het weekend.</span>
             </div>
           </div>
           <div class="step">
             <div class="step-num">3</div>
             <div class="step-body">
-              <strong>Ontvang boekingen</strong>
-              <span>Bevestig of weiger met één tap. €100 tot €200 extra per maand is haalbaar.</span>
+              <strong>Ontvang boekingen contactloos</strong>
+              <span>Bevestig of weiger met één tap. Je hoeft er niet bij te zijn tijdens de sessie — de boeker plugt zelf in met zijn eigen Type 2-kabel.</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <strong>Sluit af & krijg betaald</strong>
+              <span>Vul na de sessie het werkelijk afgenomen kWh in (afleesbaar op je paal of in je energie-app). Pluggo verstuurt automatisch een betaalverzoek en jouw uitbetaling landt binnen 1–3 werkdagen op je IBAN.</span>
             </div>
           </div>
         </div>
@@ -1227,21 +1348,28 @@
             <div class="step-num">1</div>
             <div class="step-body">
               <strong>Vind een paal in de buurt</strong>
-              <span>Zoek op de kaart, filter op prijs en beschikbaarheid, lees reviews.</span>
+              <span>Zoek op de kaart, filter op prijs, laadvermogen en tijdslot, lees reviews van eerdere boekers.</span>
             </div>
           </div>
           <div class="step">
             <div class="step-num">2</div>
             <div class="step-body">
               <strong>Boek je tijdslot</strong>
-              <span>Kies datum en tijd. De eigenaar bevestigt meestal binnen een paar uur.</span>
+              <span>Kies datum en tijd. De eigenaar bevestigt meestal binnen een paar uur. Nog niets betalen — dat komt pas ná de laadbeurt.</span>
             </div>
           </div>
           <div class="step">
             <div class="step-num">3</div>
             <div class="step-body">
-              <strong>Laad op en rijd door</strong>
-              <span>Plug in, betaal alleen voor wat je écht laadt — vaak goedkoper dan een publieke paal.</span>
+              <strong>Rijd erheen & plug in</strong>
+              <span>Neem je eigen Type 2-kabel mee. De paal staat in vrij-laden modus: aansluiten is genoeg — geen laadpas, geen app-tik aan de paal, geen aanbellen.</span>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <strong>Betaal het werkelijk afgenomen kWh</strong>
+              <span>Nadat je klaar bent, vult de eigenaar de kWh-stand in. Je krijgt een betaalverzoek in de app en rekent af via iDEAL, creditcard of Apple/Google Pay. Vaak flink goedkoper dan een publieke paal — zonder abonnement.</span>
             </div>
           </div>
         </div>
@@ -1402,7 +1530,7 @@
 
       <details>
         <summary>Waarom rekent Pluggo een servicefee terwijl andere platforms 'gratis' zijn?</summary>
-        <p>Omdat Pluggo de hele transactie zélf afhandelt — PSD2-betaling via Stripe, uitbetaling op jouw IBAN, self-billing en KOR-administratie voor particulieren, en bemiddeling bij geschillen. Die infrastructuur financieren we transparant met €0,03/kWh per kant, inclusief alle Stripe-transactiekosten. Geen abonnement, geen verborgen marges.</p>
+        <p>Omdat Pluggo de hele transactie zélf afhandelt — betaling via Stripe volgens de Europese betaalregelgeving <abbr title="Payment Services Directive 2 — de EU-regels waar betaalplatformen zoals Pluggo aan moeten voldoen">(PSD2)</abbr>, uitbetaling op jouw IBAN, self-billing en KOR-administratie voor particulieren, en bemiddeling bij geschillen. Die infrastructuur financieren we transparant met €0,03/kWh per kant, inclusief alle Stripe-transactiekosten. Geen abonnement, geen verborgen marges.</p>
         <p>"Gratis" platforms zitten meestal zélf niet in de geldstroom: zij laten de afrekening lopen via je bestaande laadpaal-backoffice (zoals Allego, Vandebron of ChargeNet) plus de laadpas-provider van de boeker (zoals Shell Recharge, Eneco of NewMotion). Een backoffice rekent doorgaans €5-15 per maand plus €0,02-0,05/kWh; de laadpas-provider zet €0,10-0,20/kWh markup bovenop jouw tarief. Bij elkaar €0,15-0,25/kWh die niet terugkomt bij jou of de boeker — vrijwel altijd duurder dan Pluggo's €0,03/kWh per kant.</p>
       </details>
 
@@ -1459,6 +1587,7 @@
       <details>
         <summary>Wat kost het voor laders?</summary>
         <p>Je betaalt het tarief dat de eigenaar instelt, plus een vaste servicefee van €0,03 per kWh van Pluggo. Voor sessies onder 10 kWh komt daar een eenmalige €0,40 transactiefee bij om de iDEAL-kosten te dekken; bij sessies vanaf 10 kWh vervalt die fee. De all-in prijs zie je direct in de app voordat je boekt, dus geen verrassingen. In de praktijk vaak nog 15–30% goedkoper dan een publieke laadpaal in de stad, zonder zoek- en wachttijd, en zonder abonnement of laadpas.</p>
+        <p>→ <a href="./goedkoop-laden.html">Lees de uitgebreide gids: goedkoop elektrisch laden in de buurt vanaf €0,28/kWh</a></p>
       </details>
 
       <details>
@@ -1470,6 +1599,12 @@
         <summary>Werkt Pluggo op alle laadpalen?</summary>
         <p>In de basis, ja — elke privélaadpaal met een Type 2-aansluiting (de standaard in Europa) kan op Pluggo. Je hoeft geen "smart" paal te hebben, geen OCPP-koppeling, geen backoffice-abonnement: de boekingen lopen via onze app, niet via de paal zelf. We werken met merken als Alfen, Wallbox, Easee, EVBox, Heidelberg, Schneider en alle andere gangbare thuis-laadpalen.</p>
         <p>Wat de paal wél moet kunnen: <strong>vrij-laden modus</strong>, zodat de boeker kan starten zonder dat hij jouw laadpas of app nodig heeft. Hoe je dat per merk instelt, zie je verderop in deze FAQ. Heb je een paal die alleen via een specifieke laadpas-provider werkt en die je niet kunt overzetten naar vrij-laden? Mail ons op <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a> — we kijken graag mee of er een workaround is.</p>
+      </details>
+
+      <details>
+        <summary>Werkt míjn laadpaal op Pluggo?</summary>
+        <p>Verreweg de meeste thuis-laadpalen werken direct — soms na één setting omzetten. Simpele check: <strong>ben jij de administratieve eigenaar van de paal, kun je zelf via een merk-app (myWallbox, Alfen, Easee, Tesla, etc.) instellingen aanpassen?</strong> Zo ja, dan is de kans heel groot dat je paal geschikt is. Alleen twee categorieën vallen echt af: <strong>lease-palen van je werkgever of leasemaatschappij</strong> (hardgekoppeld aan een backoffice als E-Flux, Shell Recharge, Vattenfall InCharge) en <strong>Eichrecht-gecertificeerde zakelijke palen</strong> (kom je zelden thuis tegen).</p>
+        <p>→ <a href="./welke-laadpaal-werkt.html"><strong>Check in 3 vragen of jouw paal geschikt is — plus stap-voor-stap instructies per merk</strong></a> (Wallbox, Alfen, Easee, Tesla, EVBox, Heidelberg, Ratio, Schneider).</p>
       </details>
 
       <details>
