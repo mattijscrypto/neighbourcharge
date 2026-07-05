@@ -14,7 +14,7 @@
   <meta property="og:image" content="https://pluggoapp.nl/og-image.jpg" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Geld verdienen met zonnepanelen na de salderingsregeling" />
-  <meta name="twitter:description" content="€0,05/kWh van je leverancier of €0,28/kWh van je buur — Pluggo maakt het verschil." />
+  <meta name="twitter:description" content="€0,05/kWh van je leverancier — of ~€0,30/kWh van je buur bij een tarief dat jij zelf bepaalt. Pluggo maakt het verschil." />
   <meta name="twitter:image" content="https://pluggoapp.nl/og-image.jpg" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
@@ -31,8 +31,9 @@
         "description": "Hoe je je zonnestroom-overschot na 2027 rendabel houdt door het te verkopen aan een buur via Pluggo.",
         "image": "https://pluggoapp.nl/og-image.jpg",
         "author": {
-          "@type": "Organization",
-          "name": "Pluggo",
+          "@type": "Person",
+          "name": "Ra'ka Cazander",
+          "jobTitle": "Oprichter Pluggo",
           "url": "https://pluggoapp.nl"
         },
         "publisher": {
@@ -44,11 +45,82 @@
           }
         },
         "datePublished": "2026-06-22",
-        "dateModified": "2026-06-22",
+        "dateModified": "2026-07-03",
         "mainEntityOfPage": {
           "@type": "WebPage",
           "@id": "https://pluggoapp.nl/zonnepanelen-verdienen.html"
         }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://pluggoapp.nl/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Gids",
+            "item": "https://pluggoapp.nl/#faq"
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "name": "Geld verdienen met zonnepanelen na de salderingsregeling",
+            "item": "https://pluggoapp.nl/zonnepanelen-verdienen.html"
+          }
+        ]
+      },
+      {
+        "@type": "HowTo",
+        "name": "Hoe verkoop je zonnestroom-overschot aan een buur via Pluggo",
+        "description": "Stap-voor-stap uitleg hoe je als paaleigenaar je zonnestroom-overschot verkoopt aan een buur die zijn EV komt laden.",
+        "totalTime": "PT10M",
+        "estimatedCost": {
+          "@type": "MonetaryAmount",
+          "currency": "EUR",
+          "value": "0"
+        },
+        "supply": [
+          { "@type": "HowToSupply", "name": "Privé-laadpaal (Type 2)" },
+          { "@type": "HowToSupply", "name": "Zonnepanelen op eigen dak" },
+          { "@type": "HowToSupply", "name": "Nederlandse bankrekening (IBAN)" }
+        ],
+        "step": [
+          {
+            "@type": "HowToStep",
+            "position": 1,
+            "name": "Voeg je laadpaal toe in de app",
+            "text": "Vul foto, adres, korte beschrijving en je prijs per kWh in. Jij bepaalt zelf het tarief; in de praktijk zien we vaak €0,30-0,40/kWh, met uitschieters naar beneden bij zonoverschot."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 2,
+            "name": "Zet je beschikbaarheid",
+            "text": "Kies de uren waarop je overschot verwacht — meestal 10:00-16:00 in de zomer."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 3,
+            "name": "Een buur boekt via de app",
+            "text": "De boeker betaalt vooraf via Stripe met iDEAL of creditcard. Geen laadpas nodig."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 4,
+            "name": "De buur laadt op jouw paal",
+            "text": "Jullie ontmoeten elkaar of niet — de paal wordt via de app op afstand vrijgegeven."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 5,
+            "name": "Vul de kWh in na de sessie",
+            "text": "De app rekent het exacte bedrag af en boekt het binnen 2 werkdagen op je IBAN via Stripe uit."
+          }
+        ]
       },
       {
         "@type": "FAQPage",
@@ -325,10 +397,10 @@
     </a>
 
     <h1>Geld verdienen met zonnepanelen — ook na het einde van saldering</h1>
-    <p class="updated">Laatst bijgewerkt: 22 juni 2026 · Leestijd 6 minuten</p>
+    <p class="updated">Door <strong>Ra'ka Cazander</strong>, oprichter Pluggo · Laatst bijgewerkt: 3 juli 2026 · Leestijd 7 minuten</p>
 
     <p class="lead">
-      Tot 2027 verdien je nog goed aan zonnepanelen via de salderingsregeling. Daarna verandert het spel: terugleveren wordt minder waard, leveranciers rekenen terugleverboetes, en je terugverdientijd wordt langer. <strong>Tenzij je je overschot anders besteedt.</strong> In dit artikel leggen we uit hoe je via Pluggo je zonnestroom-overschot doorverkoopt aan een buur die zijn elektrische auto oplaadt — en daarmee €300 tot €1.000+ per jaar extra verdient.
+      Tot 2027 verdien je nog goed aan zonnepanelen via de salderingsregeling. Daarna verandert het rendement van zonnepanelen: terugleveren wordt minder waard, leveranciers rekenen terugleverboetes, en je terugverdientijd wordt langer. <strong>Tenzij je je overschot anders besteedt.</strong> In dit artikel leggen we uit wat je met je overschot zonnepanelen kunt doen en hoe je via Pluggo je zonnestroom doorverkoopt aan een buur die zijn elektrische auto oplaadt — en daarmee €300 tot €1.000+ per jaar extra verdient, ook na 2031.
     </p>
 
     <h2>De situatie nu (2026): saldering loopt nog volop</h2>
@@ -410,6 +482,61 @@
       Wil je weten hoe een gemiddelde boeking eruit ziet? Lees de FAQ op <a href="./#faq">de homepage</a> of bekijk hoe pioniers het ervaren op <a href="./pioniers">de pioniers-pagina</a>.
     </p>
 
+    <h2>Vergelijking: Pluggo vs thuisbatterij vs terugleveren</h2>
+    <p>
+      Wie zoekt naar het beste rendement zonnepanelen na 2027 komt drie serieuze opties tegen. Ze verschillen sterk in kosten, terugverdientijd en flexibiliteit. Hieronder een eerlijke vergelijking op basis van dezelfde uitgangspositie: een gezin met 10 panelen en ~1.600 kWh overschot per jaar.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Optie</th>
+          <th>Initiële investering</th>
+          <th>Opbrengst per kWh overschot</th>
+          <th>Terugverdientijd</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Terugleveren aan leverancier (na 2031)</strong></td>
+          <td class="amount">€0</td>
+          <td class="bad">€0,05 – €0,10</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td>Thuisbatterij (10 kWh) plaatsen</td>
+          <td class="bad">€5.500 – €8.000</td>
+          <td class="amount">€0,25 – €0,30 (zelfverbruik-shift)</td>
+          <td class="bad">8 – 12 jaar</td>
+        </tr>
+        <tr>
+          <td><strong>Verkoop via Pluggo aan buur</strong></td>
+          <td class="amount">€0</td>
+          <td class="amount">€0,25 – €0,30</td>
+          <td class="amount">Direct rendabel</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Wanneer kiezen voor een thuisbatterij?</h3>
+    <p>
+      Een thuisbatterij is aantrekkelijk als je overdag <em>niet</em> thuis bent én weinig buren met een EV in de buurt hebt. Je slaat overdag op en verbruikt 's avonds — je bespaart dus het volle leveringstarief (~€0,28-0,35/kWh). Maar met €5.500-8.000 aan investering en 8-12 jaar terugverdientijd is het geen no-brainer. Sommige subsidieregelingen (per gemeente) verkorten dat, maar reken niet op meer dan 1-2 jaar korter.
+    </p>
+
+    <h3>Wanneer werkt Pluggo beter?</h3>
+    <p>
+      Voor de meeste huishoudens met een privé-laadpaal én overschot is Pluggo <strong>direct rendabel</strong> zonder investering. Je verkoopt op de momenten dat je overschot hebt (typisch 10:00-16:00), tegen bijna dezelfde vergoeding per kWh als een batterij zou opleveren. En het schaalt: krijg je 3 boekingen per week in de zomer, dan zit je al op €400-600 verdient per jaar. Combineer je Pluggo mét een kleine thuisbatterij, dan is de terugverdientijd van die batterij significant korter — de batterij dekt de avonden af, Pluggo verzilvert de zomerdag-overschot.
+    </p>
+
+    <h3>Wanneer is terugleveren nog de beste optie?</h3>
+    <p>
+      Als je op een plek woont zonder EV-verkeer in de buurt (bijvoorbeeld agrarisch buitengebied ver van bewoning) en geen thuisbatterij wil, blijft terugleveren de default. Maar reken op €0,05-0,10/kWh na 2031 — voor 1.600 kWh overschot is dat €80-160 per jaar. Als er wél een EV-rijder binnen 10 km woont, is de omschakeling naar Pluggo bijna altijd de moeite.
+    </p>
+
+    <div class="callout">
+      <p><strong>Rekenvoorbeeld — 1.600 kWh overschot:</strong> teruglevering na 2031 levert ~€112 op, een thuisbatterij (zonder subsidie) heeft na 10 jaar pas break-even, Pluggo levert vanaf jaar 1 direct <strong>€425</strong> op zonder investering. Combinatie thuisbatterij + Pluggo maximaliseert je zonnepanelen-rendement na 2031.</p>
+    </div>
+
     <h2>Voorbeeldberekening: wat levert het concreet op?</h2>
 
     <div class="calc-box">
@@ -446,7 +573,7 @@
     </div>
 
     <p>
-      Deze berekeningen gaan uit van een Pluggo-tarief van €0,28/kWh inclusief 5% servicefee, en een marktprijs voor teruglevering van €0,07/kWh in 2031. De werkelijke opbrengst hangt af van je tarief, hoe vaak je beschikbaarheid wordt geboekt en de marktprijs van dat moment.
+      Deze berekeningen gaan als voorbeeld uit van een Pluggo-tarief van €0,28/kWh (na 5% servicefee = €0,266/kWh netto naar jou) en een marktprijs voor teruglevering van €0,07/kWh in 2031. Als paaleigenaar bepaal je zelf je tarief — vaak zien we €0,30-0,40/kWh. Kies je hoger, dan is je opbrengst per kWh navenant hoger; kies je lager (bijvoorbeeld om zonoverschot sneller kwijt te raken), lager. De werkelijke opbrengst hangt af van je tarief, hoe vaak je beschikbaarheid wordt geboekt en de marktprijs van dat moment.
     </p>
 
     <h2>Wat heb je nodig om mee te doen?</h2>
