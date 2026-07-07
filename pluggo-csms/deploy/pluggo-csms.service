@@ -1,0 +1,69 @@
+# Pluggo CSMS — systemd service unit
+#
+# Installeren:
+#   sudo cp deploy/pluggo-csms.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pluggo-csms
+#
+# Verifiëren:
+#   sudo systemctl status pluggo-csms
+#   sudo journalctl -u pluggo-csms -f
+
+[Unit]
+Description=Pluggo CSMS (OCPP 1.6J WebSocket + HTTP API)
+Documentation=https://github.com/pluggo/pluggo-csms
+After=network-online.target
+Wants=network-online.target
+
+# Restart-rate-limit (moet in [Unit], niet [Service] in modern systemd)
+StartLimitBurst=10
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=pluggo
+Group=pluggo
+
+# Werkdirectory + startcommando
+WorkingDirectory=/opt/pluggo-csms/pluggo-csms
+ExecStart=/usr/bin/node /opt/pluggo-csms/pluggo-csms/index.js
+
+# Env — .env wordt door dotenv gelezen door index.js zelf.
+# Bij problemen kan je hier extra env vars zetten met Environment=.
+EnvironmentFile=/opt/pluggo-csms/pluggo-csms/.env
+
+# Restart-policy — automatisch herstart bij crash
+Restart=always
+RestartSec=5
+
+# Timeouts
+TimeoutStartSec=30
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGTERM
+
+# stdout/stderr → journald (bekijken via journalctl)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pluggo-csms
+
+# Security hardening — beperkt de blast radius als de service ooit gecompromiseerd wordt
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+ReadWritePaths=/opt/pluggo-csms
+
+# Beperk memory + CPU (voorkomt runaway process op de kleine CX22)
+MemoryMax=1G
+CPUQuota=180%
+
+[Install]
+WantedBy=multi-user.target
