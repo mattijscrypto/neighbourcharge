@@ -108,14 +108,20 @@ function base64UrlEncode(buf: ArrayBuffer | Uint8Array | string): string {
 
 async function getAccessToken(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  if (cachedAccessToken && cachedAccessToken.expiresAt > now + 60) {
-    return cachedAccessToken.token;
-  }
+  // DEBUG: cache tijdelijk uitgezet — altijd fresh token ophalen
+  // if (cachedAccessToken && cachedAccessToken.expiresAt > now + 60) {
+  //   return cachedAccessToken.token;
+  // }
 
   const sa = getServiceAccount();
+  console.log("[send-push] getAccessToken: project_id =", sa.project_id, "client_email =", sa.client_email);
+
   const header = { alg: "RS256", typ: "JWT" };
   const claim = {
     iss: sa.client_email,
+    // DEBUG: terug naar canonieke FCM scope. cloud-platform gaf 401 op FCM
+    // terwijl tokeninfo zei dat de token geldig was. firebase.messaging is
+    // de scope die Google zelf aanbeveelt voor FCM HTTP v1.
     scope: "https://www.googleapis.com/auth/firebase.messaging",
     aud: "https://oauth2.googleapis.com/token",
     exp: now + 3600,
@@ -143,11 +149,35 @@ async function getAccessToken(): Promise<string> {
   });
   if (!resp.ok) {
     const txt = await resp.text();
+    console.error("[send-push] OAuth2 token exchange faalde:", resp.status, txt);
     throw new Error(`OAuth2 token exchange faalde: ${resp.status} ${txt}`);
   }
   const json = await resp.json();
+  const token = json.access_token;
+  console.log(
+    "[send-push] OAuth2 token exchange OK — token length:",
+    token?.length ?? 0,
+    "prefix:",
+    token ? token.slice(0, 20) + "..." : "(empty!)",
+    "expires_in:",
+    json.expires_in,
+    "scope in response:",
+    json.scope,
+  );
+
+  // DEBUG: verifieer token via Google's tokeninfo endpoint
+  try {
+    const tiResp = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`,
+    );
+    const tiText = await tiResp.text();
+    console.log("[send-push] tokeninfo status:", tiResp.status, "body:", tiText);
+  } catch (e) {
+    console.error("[send-push] tokeninfo call faalde:", e);
+  }
+
   cachedAccessToken = {
-    token: json.access_token,
+    token,
     expiresAt: now + (json.expires_in ?? 3600),
   };
   return cachedAccessToken.token;
@@ -196,11 +226,23 @@ async function sendToToken(
 
   const url =
     `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+  console.log(
+    "[send-push] FCM POST:",
+    url,
+    "| token prefix:",
+    accessToken ? accessToken.slice(0, 20) + "..." : "(empty!)",
+    "| token length:",
+    accessToken?.length ?? 0,
+  );
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
+      // DEBUG: sommige Google Cloud APIs geven 401 "missing credential" terug
+      // als deze header ontbreekt, ook bij geldige Bearer token. Attribueert
+      // de request expliciet aan ons project voor quota/billing.
+      "x-goog-user-project": projectId,
     },
     body: JSON.stringify({ message }),
   });
@@ -280,6 +322,7 @@ serve(async (req) => {
 
     let sent = 0;
     const deadIds: string[] = [];
+    const errors: string[] = [];
 
     // Sequentieel — de meeste users hebben 1-2 devices, dus paralleliseren
     // voegt complexiteit toe zonder veel winst.
@@ -296,8 +339,17 @@ serve(async (req) => {
         sent++;
       } else if (result.removeToken) {
         deadIds.push(row.id);
+        if (result.error) {
+          console.error("[send-push] dead token:", result.error);
+        }
+      } else {
+        // Andere fouten: log ze zodat we ze kunnen diagnosticeren
+        // (rate limit, config errors, APNs propagation, etc).
+        if (result.error) {
+          console.error("[send-push] fcm error:", result.error);
+          errors.push(result.error);
+        }
       }
-      // Andere fouten: laten zitten, kunnen tijdelijk zijn (rate limit etc).
     }
 
     if (deadIds.length > 0) {
@@ -305,7 +357,11 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ sent, removed: deadIds.length }),
+      JSON.stringify({
+        sent,
+        removed: deadIds.length,
+        ...(errors.length > 0 ? { errors } : {}),
+      }),
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
