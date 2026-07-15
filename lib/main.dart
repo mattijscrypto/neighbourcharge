@@ -17016,14 +17016,17 @@ class _SignupScreenState extends State<SignupScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   bool _loading = false;
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -17031,13 +17034,22 @@ class _SignupScreenState extends State<SignupScreen> {
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
 
-    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+    if (name.isEmpty || email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
       _showError('Vul alle velden in');
       return;
     }
     if (password.length < 6) {
       _showError('Wachtwoord moet minimaal 6 tekens zijn');
+      return;
+    }
+    // #305 — Rob D. maakte een typo bij signup en kon 't wachtwoord daarna
+    // niet meer raden. Dubbele invoer + duidelijke error voorkomt dit
+    // scenario. Tip erbij: verwijs naar het oog-icoontje zodat gebruikers
+    // die 't nog niet zagen weten dat ze hun invoer kunnen verifiëren.
+    if (password != confirmPassword) {
+      _showError('De wachtwoorden komen niet overeen. Tip: druk op het oog-icoontje om je invoer te controleren.');
       return;
     }
 
@@ -17161,7 +17173,31 @@ class _SignupScreenState extends State<SignupScreen> {
                     color: AppColors.textSecondary,
                     size: 20,
                   ),
+                  tooltip: _obscurePassword
+                      ? 'Wachtwoord tonen'
+                      : 'Wachtwoord verbergen',
                   onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _fieldLabel('Wachtwoord bevestigen'),
+              _authTextField(
+                controller: _confirmPasswordController,
+                hint: 'Typ hetzelfde wachtwoord nogmaals',
+                icon: Icons.lock_outline_rounded,
+                obscureText: _obscureConfirmPassword,
+                suffix: IconButton(
+                  icon: Icon(
+                    _obscureConfirmPassword
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                    color: AppColors.textSecondary,
+                    size: 20,
+                  ),
+                  tooltip: _obscureConfirmPassword
+                      ? 'Wachtwoord tonen'
+                      : 'Wachtwoord verbergen',
+                  onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
                 ),
               ),
               const SizedBox(height: 28),
