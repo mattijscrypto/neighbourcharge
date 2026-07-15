@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,8 +16,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'live_charging_widget.dart';
 import 'push.dart';
+import 'push_actions.dart';
 import 'stripe_service.dart';
+import 'vehicle_presets.dart';
 
 // Supabase configuratie
 // Voor een echt product horen deze in environment variables,
@@ -143,14 +147,41 @@ const String launchDateLabel = '7 juli 2026';
 // IBAN op het profiel staat.
 // ============================================
 
-/// Heel pragmatische NL-IBAN-check: 18 tekens, begint met "NL", daarna
-/// 2 cijfers, 4 letters, 10 cijfers. We accepteren spaties bij invoer
-/// (die strippen we) maar geen andere landcodes — Pluggo betaalt voorlopig
-/// alleen Nederlandse rekeningen uit.
+/// NL-IBAN-check in twee lagen:
+/// 1) Structureel — 18 tekens "NL" + 2 cijfers + 4 letters + 10 cijfers
+/// 2) Mod-97 checksum (ISO 13616) — vangt typo's in de controlegetallen
+/// Spaties bij invoer mogen, andere landcodes niet (Pluggo betaalt voorlopig
+/// alleen Nederlandse rekeningen uit).
 bool isValidNlIban(String input) {
   final cleaned = input.replaceAll(' ', '').toUpperCase();
   final regex = RegExp(r'^NL\d{2}[A-Z]{4}\d{10}$');
-  return regex.hasMatch(cleaned);
+  if (!regex.hasMatch(cleaned)) return false;
+  return _ibanMod97Check(cleaned);
+}
+
+/// IBAN mod-97 check (ISO 13616): verplaats de eerste 4 tekens naar achter,
+/// converteer letters naar 2-cijferige nummers (A=10..Z=35), check dat het
+/// resterende getal mod 97 == 1. NL-IBAN wordt ~24 cijfers na conversie,
+/// dus BigInt is nodig (te groot voor Int64).
+bool _ibanMod97Check(String iban) {
+  final rearranged = iban.substring(4) + iban.substring(0, 4);
+  final buf = StringBuffer();
+  for (final ch in rearranged.codeUnits) {
+    if (ch >= 0x30 && ch <= 0x39) {
+      // '0'-'9'
+      buf.writeCharCode(ch);
+    } else if (ch >= 0x41 && ch <= 0x5A) {
+      // 'A'-'Z' → A=10, B=11, ... Z=35
+      buf.write((ch - 55).toString());
+    } else {
+      return false;
+    }
+  }
+  try {
+    return BigInt.parse(buf.toString()) % BigInt.from(97) == BigInt.one;
+  } catch (_) {
+    return false;
+  }
 }
 
 /// Normaliseert IBAN naar uppercase zonder spaties — zo slaan we 'm op.
@@ -167,6 +198,33 @@ String prettyIban(String iban) {
     buffer.write(clean[i]);
   }
   return buffer.toString();
+}
+
+/// TextInputFormatter die tijdens typen automatisch elke 4 tekens een spatie
+/// invoegt en alles uppercase maakt — geeft IBAN-veld een "NL12 ABCD 0123 ..."
+/// look-and-feel zonder dat user handmatig spaties hoeft te typen.
+/// Limiet: 22 tekens (18 cijfers/letters + 4 spaties) voor NL-IBAN.
+class IbanInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final clean =
+        newValue.text.replaceAll(' ', '').toUpperCase();
+    // Cap op 18 tekens (NL-IBAN-lengte) zodat we niet eindeloos doortypen.
+    final capped = clean.length > 18 ? clean.substring(0, 18) : clean;
+    final buf = StringBuffer();
+    for (var i = 0; i < capped.length; i++) {
+      if (i > 0 && i % 4 == 0) buf.write(' ');
+      buf.write(capped[i]);
+    }
+    final formatted = buf.toString();
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
 }
 
 /// Haalt de IBAN op die in `profiles.iban` voor de huidige gebruiker staat.
@@ -871,6 +929,112 @@ Future<void> _openExternalUrl(String url) async {
   }
 }
 
+// ============================================
+// Google Places Autocomplete + Details
+// --------------------------------------------
+// Voor adres-invoer bij paal toevoegen: laat eigenaar tijdens typen uit
+// een lijst Nederlandse adressen kiezen i.p.v. zelf typen. Voorkomt
+// typo's waardoor palen niet geocoderen en dus nooit op de kaart komen.
+//
+// Sessie-tokens: één UUID-achtig token per zoekvraag, zodat
+// Autocomplete + Details samen als 1 sessie gefactureerd worden
+// (~€0.014 per nieuwe paal i.p.v. per request). Token wordt
+// hergebruikt voor elke keystroke en weggegooid na de Details-call.
+//
+// Vereist dat Places API is aangezet in Google Cloud Console
+// (hetzelfde project als Geocoding API; zelfde key).
+// ============================================
+class PlacePrediction {
+  final String placeId;
+  final String description; // bv. "Zonnelaan 12, 1234 AB Amersfoort, Nederland"
+  const PlacePrediction({required this.placeId, required this.description});
+}
+
+class PlaceDetailsResult {
+  final String formattedAddress;
+  final LatLng coords;
+  const PlaceDetailsResult({
+    required this.formattedAddress,
+    required this.coords,
+  });
+}
+
+String newPlacesSessionToken() {
+  // Google accepteert elke opaque string ≤36 chars als session token.
+  // Mix van timestamp + 2 secure-random hex = uniek genoeg voor 1 sessie
+  // zonder externe uuid-package.
+  final r = math.Random.secure();
+  final ts = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+  final a = r.nextInt(0xFFFFFFFF).toRadixString(16).padLeft(8, '0');
+  final b = r.nextInt(0xFFFFFFFF).toRadixString(16).padLeft(8, '0');
+  return '$ts$a$b';
+}
+
+Future<List<PlacePrediction>> placesAutocompleteNL(
+  String query, {
+  required String sessionToken,
+}) async {
+  if (query.trim().length < 3) return const [];
+  final url = Uri.parse(
+    'https://maps.googleapis.com/maps/api/place/autocomplete/json'
+    '?input=${Uri.encodeComponent(query)}'
+    '&components=country:nl'
+    '&language=nl'
+    '&types=address'
+    '&sessiontoken=$sessionToken'
+    '&key=$googleMapsApiKey',
+  );
+  try {
+    final res = await http.get(url);
+    if (res.statusCode != 200) return const [];
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final status = data['status'] as String?;
+    // OVER_QUERY_LIMIT / REQUEST_DENIED / INVALID_REQUEST → stil falen.
+    // Geen rode SnackBar terwijl gebruiker typt.
+    if (status != 'OK' && status != 'ZERO_RESULTS') return const [];
+    final preds = (data['predictions'] as List? ?? const [])
+        .map((p) => PlacePrediction(
+              placeId: (p as Map)['place_id'] as String,
+              description: p['description'] as String,
+            ))
+        .toList();
+    return preds.take(5).toList();
+  } catch (_) {
+    // Netwerk-glitch tijdens typen → stilte is beter dan een error-popup.
+    return const [];
+  }
+}
+
+Future<PlaceDetailsResult> placeDetails(
+  String placeId, {
+  required String sessionToken,
+}) async {
+  final url = Uri.parse(
+    'https://maps.googleapis.com/maps/api/place/details/json'
+    '?place_id=$placeId'
+    '&fields=geometry,formatted_address'
+    '&sessiontoken=$sessionToken'
+    '&key=$googleMapsApiKey',
+  );
+  final res = await http.get(url);
+  if (res.statusCode != 200) {
+    throw Exception('Adres-details ophalen mislukt');
+  }
+  final data = jsonDecode(res.body) as Map<String, dynamic>;
+  if (data['status'] != 'OK') {
+    throw Exception('Adres niet gevonden bij Google (${data['status']})');
+  }
+  final result = data['result'] as Map<String, dynamic>;
+  final loc = (result['geometry'] as Map)['location'] as Map;
+  return PlaceDetailsResult(
+    formattedAddress: result['formatted_address'] as String,
+    coords: LatLng(
+      (loc['lat'] as num).toDouble(),
+      (loc['lng'] as num).toDouble(),
+    ),
+  );
+}
+
 // Zoek coördinaten op bij een adres via Google Geocoding API.
 // Retourneert een LatLng bij succes, of gooit een foutmelding.
 Future<LatLng> geocodeAddress(String address) async {
@@ -916,6 +1080,12 @@ Future<void> main() async {
   // permissie. Dat doen we pas op het juiste moment in de app.
   await PluggoPush.instance.init();
 
+  // Push action-buttons (task #292): MethodChannel-listener registreren
+  // zodat lockscreen taps op "Verleng 15/30/60 min" een RPC-call triggeren.
+  // Native (AppDelegate.swift) buffert eventuele cold-start events tot de
+  // Dart-kant "ready" pingt — dat gebeurt in init() hier.
+  unawaited(PluggoPushActions.instance.init());
+
   await Supabase.initialize(
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
@@ -923,10 +1093,24 @@ Future<void> main() async {
 
   // Stripe SDK initialiseren — alleen de publishable key, geen Apple Pay
   // merchant identifier (die voegen we toe als we Apple Pay aanzetten;
-  // voor launch is iDEAL + kaart genoeg). applySettings() is async maar
-  // hoeft niet ge-awaited te worden — Stripe queue't calls tot 'ie ready is.
+  // voor launch is iDEAL + kaart genoeg).
+  //
+  // applySettings() NIET awaiten en NOOIT laten blokkeren in main(): op
+  // sommige Android-tablets (gezien op Samsung Tab A8 + Android 14, Unisoc
+  // T618 zonder volledige Google Wallet) hangt de native Google Pay
+  // readiness-check eindeloos. Zonder timeout/unawaited bleef de splash
+  // hangen omdat runApp() nooit werd bereikt.
+  //
+  // Fire-and-forget met 5s timeout en stille catch — Stripe queue't calls
+  // tot de SDK klaar is, dus bij feitelijk gebruik (checkout, onboarding)
+  // wordt 'ie alsnog correct geïnitialiseerd door flutter_stripe zelf.
   Stripe.publishableKey = stripePublishableKey;
-  await Stripe.instance.applySettings();
+  unawaited(
+    Stripe.instance
+        .applySettings()
+        .timeout(const Duration(seconds: 5))
+        .catchError((_) {}),
+  );
 
   // Vul de bypass-cache zodra Supabase staat. Als er een actieve session is,
   // checkt 'ie meteen of de user op de DB-lijst staat zodat de date-gate al
@@ -968,6 +1152,19 @@ class Charger {
   // te verbergen en een waarschuwing te tonen. Zie migratie 0010 en de
   // `chargers_public` view voor de server-kant.
   final bool isExactLocation;
+  // Maximaal laadvermogen van de paal in kW. Uit `chargers.max_power_kw`
+  // (nullable — eigenaar heeft 'm niet altijd ingevuld). Gebruikt voor
+  // ETA-berekening in de LiveChargingCard: effective_kw = LEAST(paal, auto).
+  // Zie migratie 0023.
+  final double? maxPowerKw;
+
+  // OCPP-koppeling: identifier waarmee deze paal bij het CSMS bekend staat
+  // (chargers.ocpp_charger_id in de DB, gezet zodra de eigenaar de paal
+  // met het OCPP-endpoint verbindt). Null zolang de paal 'unmanaged' is —
+  // dan tonen we in de app géén "Start laden nu"/"Stop laden nu"-knoppen
+  // want er is niks om een RemoteStart/Stop naartoe te sturen. Zie task
+  // #293 en de remote-start-session / remote-stop-session edge functions.
+  final String? ocppChargerId;
 
   const Charger({
     required this.id,
@@ -987,6 +1184,8 @@ class Charger {
     this.accessType = 'open',
     this.ownerIsPioneer = false,
     this.isExactLocation = false,
+    this.maxPowerKw,
+    this.ocppChargerId,
   });
 
   // Van een database-rij (Map) naar een Charger-object.
@@ -1040,6 +1239,11 @@ class Charger {
       accessType: map['access_type'] as String? ?? 'open',
       ownerIsPioneer: ownerIsPioneer,
       isExactLocation: isExactLocation,
+      maxPowerKw: (map['max_power_kw'] as num?)?.toDouble(),
+      // Alleen zichtbaar voor owner/booker via `chargers.*` (RLS + column
+      // grants); publieke chargers_public view geeft dit nooit terug. Als
+      // key ontbreekt of expliciet null is → paal is niet aan CSMS gekoppeld.
+      ocppChargerId: map['ocpp_charger_id'] as String?,
     );
   }
 }
@@ -1177,6 +1381,12 @@ class Booking {
   // Pay-after-charge: owner vult kWh in na de laadbeurt, dan kan boeker betalen.
   final double? kwhConsumed;
   final DateTime? paymentRequestedAt;
+  // SoC-velden voor OCPP-sessie (task #287): startSocPct is optioneel
+  // — als user 'm bij boeken niet zette, kunnen we geen absoluut % tonen.
+  // targetSocPct is NOT NULL in DB met default 80 (batterij-vriendelijk).
+  // Zie migratie 0023.
+  final int? startSocPct;
+  final int targetSocPct;
   // Optioneel: charger-info uit een joined query
   final Charger? charger;
 
@@ -1195,6 +1405,8 @@ class Booking {
     this.totalAmountCents,
     this.kwhConsumed,
     this.paymentRequestedAt,
+    this.startSocPct,
+    this.targetSocPct = 80,
     this.charger,
   });
 
@@ -1237,6 +1449,10 @@ class Booking {
       totalAmountCents: map['total_amount_cents'] as int?,
       kwhConsumed: parseKwh(map['kwh_consumed']),
       paymentRequestedAt: parseTs(map['payment_requested_at']),
+      startSocPct: (map['start_soc_pct'] as num?)?.toInt(),
+      // Default 80 als kolom om wat voor reden dan ook null zou zijn
+      // (bestaat niet in de rij, oude data van vóór migratie 0023, etc.)
+      targetSocPct: (map['target_soc_pct'] as num?)?.toInt() ?? 80,
       charger: charger,
     );
   }
@@ -1669,6 +1885,18 @@ class _HomeScreenState extends State<HomeScreen> {
   // Voorkomt dat we meerdere keren tegelijk locatie proberen op te halen
   bool _locating = false;
 
+  // Controller voor de sleepbare bottom sheet. Nodig om de sheet-hoogte
+  // programmatisch te sturen wanneer de user op het grijze handvat sleept
+  // (in plaats van op de scrollbare lijst eronder). Zonder eigen controller
+  // is de handle een dood stuk UI — dan werkt slepen alleen op de kaarten.
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
+
+  // Snap-punten voor de bottom sheet — moeten overeenkomen met wat we aan
+  // DraggableScrollableSheet zelf meegeven (snapSizes), anders spring hij
+  // na drag-end naar een andere positie dan waar hij normaal snapt.
+  static const List<double> _sheetSnaps = [0.18, 0.32, 0.85];
+
   @override
   void initState() {
     super.initState();
@@ -1687,7 +1915,38 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _sheetController.dispose();
     super.dispose();
+  }
+
+  // === Sleep-handlers voor het grijze handvat + header van de bottom sheet ===
+  //
+  // Zonder deze handlers is het handvat een dood stuk UI: de
+  // DraggableScrollableSheet reageert alleen op scroll-gebaren binnen de
+  // lijst eronder. Deze GestureDetector vertaalt vertikale drags op het
+  // handvat/header direct naar sheet-hoogte-veranderingen via de controller.
+  void _onSheetHandleDragUpdate(DragUpdateDetails details) {
+    if (!_sheetController.isAttached) return;
+    final screenHeight = MediaQuery.of(context).size.height;
+    if (screenHeight <= 0) return;
+    final newSize = (_sheetController.size - details.delta.dy / screenHeight)
+        .clamp(_sheetSnaps.first, _sheetSnaps.last);
+    _sheetController.jumpTo(newSize);
+  }
+
+  void _onSheetHandleDragEnd(DragEndDetails details) {
+    if (!_sheetController.isAttached) return;
+    // Snap naar dichtstbijzijnde snap-punt zodat het gedrag overeenkomt met
+    // wat DraggableScrollableSheet zelf doet bij drags op de lijst.
+    final current = _sheetController.size;
+    final target = _sheetSnaps.reduce(
+      (a, b) => (a - current).abs() < (b - current).abs() ? a : b,
+    );
+    _sheetController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
   }
 
   // Gefilterde lijst op basis van zoekterm. Case-insensitive match op
@@ -3213,11 +3472,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // === Sleepbare bottom sheet met lijst van laadpunten ===
           DraggableScrollableSheet(
+            controller: _sheetController,
             initialChildSize: 0.32,
-            minChildSize: 0.18,
-            maxChildSize: 0.85,
+            minChildSize: _sheetSnaps.first,
+            maxChildSize: _sheetSnaps.last,
             snap: true,
-            snapSizes: const [0.18, 0.32, 0.85],
+            snapSizes: _sheetSnaps,
             builder: (context, scrollController) {
               return Container(
                 decoration: BoxDecoration(
@@ -3235,62 +3495,80 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Sleep-handvat (horizontale bar bovenin)
-                    const SizedBox(height: 10),
-                    Container(
-                      width: 44,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppColors.divider,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    // Header met titel + teller
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Row(
+                    // Sleep-zone: handvat + header + banner reageren allemaal
+                    // op vertikale drags via de sheet-controller. HitTestBehavior
+                    // .opaque zorgt dat óók de lege ruimtes tussen widgets drag-
+                    // gebaren opvangen — anders werkt slepen alleen op het
+                    // handvat zelf en niet op de omringende padding.
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragUpdate: _onSheetHandleDragUpdate,
+                      onVerticalDragEnd: _onSheetHandleDragEnd,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            'Laadpunten in de buurt',
-                            style: GoogleFonts.inter(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
+                          // Sleep-handvat (horizontale bar bovenin)
+                          const SizedBox(height: 10),
+                          Container(
+                            width: 44,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: AppColors.divider,
+                              borderRadius: BorderRadius.circular(2),
                             ),
                           ),
-                          const Spacer(),
-                          if (!_loading && _error == null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primarySoft,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                '${_visibleChargers.length}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primaryDark,
+                          const SizedBox(height: 14),
+                          // Header met titel + teller
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 20),
+                            child: Row(
+                              children: [
+                                Text(
+                                  'Laadpunten in de buurt',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary,
+                                  ),
                                 ),
-                              ),
+                                const Spacer(),
+                                if (!_loading && _error == null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primarySoft,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      '${_visibleChargers.length}',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.primaryDark,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          // Pre-launch banner — alleen zichtbaar zolang
+                          // bookingsAreLive == false. Toont aan iedereen die
+                          // de palenlijst opent dat boekingen op 7 juli open
+                          // gaan.
+                          if (!bookingsAreLive)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                              child: const LaunchCountdownBanner(),
                             ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    // Pre-launch banner — alleen zichtbaar zolang
-                    // bookingsAreLive == false. Toont aan iedereen die
-                    // de palenlijst opent dat boekingen op 7 juli open gaan.
-                    if (!bookingsAreLive)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                        child: const LaunchCountdownBanner(),
-                      ),
                     Expanded(
                       child: _buildChargerList(scrollController),
                     ),
@@ -4250,7 +4528,8 @@ class _StripeOnboardingScreenState extends State<StripeOnboardingScreen>
       return;
     }
     try {
-      final row = await supabase
+      // Eerste pass: lees huidige DB-state zodat de UI iets kan tonen.
+      var row = await supabase
           .from('profiles')
           .select(
             'stripe_account_id, stripe_account_status, '
@@ -4260,6 +4539,45 @@ class _StripeOnboardingScreenState extends State<StripeOnboardingScreen>
           )
           .eq('id', userId)
           .maybeSingle();
+
+      // Self-healing tegen kapotte webhook-delivery: als er een Stripe
+      // account bestaat maar de status nog niet 'verified' is, roepen we
+      // stripe-refresh-account aan. Die polt Stripe direct en syncet de
+      // profiel-velden. Daarna lezen we de DB nogmaals zodat de UI de
+      // verse state ziet zonder dat de gebruiker uit en weer inloggen
+      // hoeft. Faalt de refresh (netwerk/500)? Slikken we in — de
+      // eerste-pass state blijft dan gewoon zichtbaar.
+      //
+      // Dit is bewust idempotent: verified accounts skippen we (geen
+      // onnodige Stripe API-calls). Accounts zonder stripe_account_id
+      // ook (er valt niks te syncen).
+      final currentAccountId = row?['stripe_account_id'] as String?;
+      final currentStatus = row?['stripe_account_status'] as String?;
+      final shouldRefresh = currentAccountId != null &&
+          currentAccountId.isNotEmpty &&
+          currentStatus != 'verified' &&
+          currentStatus != 'rejected';
+
+      if (shouldRefresh) {
+        try {
+          await StripeService.instance.refreshAccountStatus();
+          // Herlees na de refresh; de edge function heeft de rij bijgewerkt.
+          row = await supabase
+              .from('profiles')
+              .select(
+                'stripe_account_id, stripe_account_status, '
+                'stripe_charges_enabled, stripe_payouts_enabled, '
+                'stripe_details_submitted, stripe_disabled_reason, '
+                'stripe_currently_due',
+              )
+              .eq('id', userId)
+              .maybeSingle();
+        } catch (e) {
+          debugPrint('_loadStatus: refresh mislukt, val terug op DB-state: $e');
+          // Bewust geen SnackBar — dit is een silent best-effort refresh.
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _stripeAccountId = row?['stripe_account_id'] as String?;
@@ -4496,10 +4814,34 @@ class _StripeOnboardingScreenState extends State<StripeOnboardingScreen>
             ),
           ),
           const SizedBox(height: 8),
-          _bullet('Identiteit verifiëren (paspoort of ID-kaart)'),
+          _bullet('Persoonsgegevens invullen'),
           _bullet('Bankrekening koppelen (IBAN)'),
           _bullet('Adres bevestigen'),
           const SizedBox(height: 8),
+          // Tip alleen voor nieuwe gebruikers — Stripe vraagt tijdens KYC om
+          // een website of productomschrijving. Voor particulieren zonder
+          // eigen website is dat verwarrend. Door pluggoapp.nl in te vullen
+          // scrapet Stripe zelf de productinfo en hoeft de gebruiker niets
+          // meer te typen.
+          if (_visualState == _OnboardingVisualState.notStarted)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '💡 Tip: bij "website" kun je pluggoapp.nl invullen. '
+                'De rest vult Stripe dan zelf in. Soms vraagt Stripe om '
+                'een ID of paspoort — meestal niet nodig.',
+                style: GoogleFonts.inter(
+                  fontSize: 12.5,
+                  color: AppColors.primaryDark,
+                  height: 1.4,
+                ),
+              ),
+            ),
           Text(
             'Stripe vraagt deze info omdat ze als betaaldienst onder Europese '
             'wetgeving (PSD2) moeten weten wie je bent. Je gegevens blijven '
@@ -4768,6 +5110,12 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
   String _accessType = 'open';
   bool _saving = false;
 
+  // Coords van het door user gekozen Google Places-adres. Null = nog niks
+  // gekozen (of selectie overschreven door verder typen). Bij submit moet
+  // dit gezet zijn — anders weigert de form, want zonder lat/lng-paar
+  // belandt de paal niet op de kaart.
+  LatLng? _selectedCoords;
+
   // Foto-upload state
   final List<XFile> _pickedPhotos = [];
   static const int _maxPhotos = 4;
@@ -4898,6 +5246,20 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
       return;
     }
 
+    // Adres moet via de autocomplete-suggesties gekozen zijn. Zonder
+    // _selectedCoords hebben we geen geverifieerd geocodeerbaar adres,
+    // en eindigt de paal mogelijk op het verkeerde punt of helemaal niet
+    // op de kaart.
+    if (_selectedCoords == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kies je adres uit de suggesties hierboven'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     final price = double.tryParse(_priceController.text.replaceAll(',', '.'));
     if (price == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -4912,8 +5274,9 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
     setState(() => _saving = true);
 
     try {
-      // Stap 1: zoek coördinaten op via Google Geocoding
-      final coords = await geocodeAddress(_addressController.text.trim());
+      // Stap 1: gebruik de lat/lng die Google Places ons al gaf bij selectie
+      // — geen extra Geocoding-call nodig (scheelt latency + 1 API-call).
+      final coords = _selectedCoords!;
 
       // Stap 2: sla op in Supabase (owner_id is vereist door RLS)
       final userId = supabase.auth.currentUser?.id;
@@ -4921,7 +5284,11 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
         throw Exception('Je bent niet ingelogd');
       }
 
-      // Insert met .select().single() geeft de nieuwe row terug inclusief id
+      // Insert met .select('id').single(). We selecteren bewust alleen
+      // `id` omdat authenticated sinds 0030 geen SELECT-grant meer heeft
+      // op alle kolommen (lat/lng geblokkeerd — anders zou een INSERT
+      // ... RETURNING * hier falen). Voor het volledige owner-view-object
+      // fetchen we hieronder via `my_chargers()`.
       final inserted = await supabase
           .from('chargers')
           .insert({
@@ -4940,7 +5307,7 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
             'owner_id': userId,
             'owner_email': supabase.auth.currentUser?.email,
           })
-          .select()
+          .select('id')
           .single();
 
       final chargerId = inserted['id'] as String;
@@ -4972,25 +5339,40 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
       // ignore: unawaited_futures
       PluggoPush.instance.requestPermissionAndRegister();
 
-      // Bouw een Charger-object van de zojuist ingevoegde rij. We hebben
-      // .select().single() op de insert gedaan, dus `inserted` bevat alle
-      // velden — alleen photo_urls zit daar nog niet in als de upload pas
-      // daarna gebeurde, dus die patchen we manueel.
-      final freshRow = Map<String, dynamic>.from(inserted);
-      if (_pickedPhotos.isNotEmpty) {
-        // Lazy: refetch zodat photo_urls erin zit. Niet kritiek voor
-        // AvailabilityScreen, die gebruikt alleen charger.id, maar netjes
-        // is netjes — dan klopt 't object als er ooit meer mee gedaan wordt.
-        try {
-          final refetched = await supabase
-              .from('chargers')
-              .select()
-              .eq('id', chargerId)
-              .single();
-          freshRow.addAll(refetched);
-        } catch (_) {
-          // Niet-fataal — fallback op de oorspronkelijke rij.
+      // Bouw een Charger-object van de zojuist ingevoegde rij. De insert
+      // hierboven gaf alleen `id` terug (owner heeft geen SELECT-grant
+      // meer op lat/lng sinds 0030), dus we halen de volledige rij nu op
+      // via my_chargers() — dat draait als SECURITY DEFINER en levert
+      // álle kolommen voor eigen palen. Als de refetch mislukt vallen we
+      // terug op de form-values (die matchen wat we net inserted hebben).
+      Map<String, dynamic> freshRow = <String, dynamic>{
+        'id': chargerId,
+        'name': _nameController.text.trim(),
+        'address': _addressController.text.trim(),
+        'price': price,
+        'type': _selectedType,
+        'available': true,
+        'solar': _isSolar,
+        'cable_included': _cableIncluded,
+        'access_type': _accessType,
+        'lat': coords.latitude,
+        'lng': coords.longitude,
+        'description': _descriptionController.text.trim(),
+        'instructions': _instructionsController.text.trim(),
+        'owner_id': userId,
+        'owner_email': supabase.auth.currentUser?.email,
+        'photo_urls': const <String>[],
+      };
+      try {
+        final rows = await supabase
+            .rpc('my_chargers')
+            .eq('id', chargerId);
+        if (rows is List && rows.isNotEmpty) {
+          freshRow = Map<String, dynamic>.from(rows.first as Map);
         }
+      } catch (_) {
+        // Niet-fataal — form-values-fallback hierboven vangt dit op.
+        // AvailabilityScreen gebruikt toch alleen charger.id.
       }
       // Owner heeft net z'n eigen paal aangemaakt — exacte locatie hoort
       // er bij. (Wordt direct doorgepushed naar AvailabilityScreen, niet
@@ -5085,10 +5467,16 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
             ),
             const SizedBox(height: 20),
             _label('Adres'),
-            _textField(
+            _AddressAutocompleteField(
               controller: _addressController,
-              hint: 'bijv. Zonnelaan 12, Amersfoort',
-              icon: Icons.location_on_outlined,
+              onSelected: (result) {
+                setState(() => _selectedCoords = result.coords);
+              },
+              onChangedAfterSelection: () {
+                if (_selectedCoords != null) {
+                  setState(() => _selectedCoords = null);
+                }
+              },
             ),
             const Padding(
               padding: EdgeInsets.only(left: 4, top: 8),
@@ -5098,7 +5486,8 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'We zoeken de coördinaten automatisch op bij je adres.',
+                      'Kies je adres uit de lijst zodat we de paal exact op de '
+                      'kaart kunnen zetten.',
                       style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ),
@@ -5426,6 +5815,207 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+// ============================================================================
+// _AddressAutocompleteField
+// ----------------------------------------------------------------------------
+// Adresinvoer met live suggesties uit Google Places (alleen NL). User moet
+// een adres uit de lijst kiezen — voorkomt typo's die palen niet-geocodeerbaar
+// maken en dus onvindbaar op de kaart.
+//
+// - 250ms debounce zodat we niet bij elke keystroke een call doen
+// - Sessie-token blijft hetzelfde tijdens typen, wordt vervangen na elke
+//   selectie (Google rekent autocomplete + 1 details-call samen af als 1 sessie)
+// - Bij wijziging na selectie: parent krijgt `onChangedAfterSelection`
+//   callback zodat eerder opgeslagen lat/lng kan worden weggegooid
+// ============================================================================
+class _AddressAutocompleteField extends StatefulWidget {
+  final TextEditingController controller;
+  final ValueChanged<PlaceDetailsResult> onSelected;
+  final VoidCallback onChangedAfterSelection;
+
+  const _AddressAutocompleteField({
+    required this.controller,
+    required this.onSelected,
+    required this.onChangedAfterSelection,
+  });
+
+  @override
+  State<_AddressAutocompleteField> createState() =>
+      _AddressAutocompleteFieldState();
+}
+
+class _AddressAutocompleteFieldState extends State<_AddressAutocompleteField> {
+  String _sessionToken = newPlacesSessionToken();
+  List<PlacePrediction> _predictions = const [];
+  bool _loading = false;
+  bool _resolving = false;
+  Timer? _debounce;
+  bool _hasSelected = false;
+  String? _selectedText;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onTextChanged(String value) {
+    // Edit na selectie → de opgeslagen lat/lng matcht het adres niet meer.
+    // Parent moet z'n state opschonen, anders slaan we straks een paal op
+    // met coords van een ANDER adres dan wat in het veld staat.
+    if (_hasSelected && value != _selectedText) {
+      _hasSelected = false;
+      widget.onChangedAfterSelection();
+    }
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () async {
+      if (value.trim().length < 3) {
+        if (mounted) setState(() => _predictions = const []);
+        return;
+      }
+      if (mounted) setState(() => _loading = true);
+      final preds =
+          await placesAutocompleteNL(value, sessionToken: _sessionToken);
+      if (!mounted) return;
+      setState(() {
+        _predictions = preds;
+        _loading = false;
+      });
+    });
+  }
+
+  Future<void> _onPick(PlacePrediction p) async {
+    if (_resolving) return;
+    // Keyboard wegklappen zodat de bevestiging zichtbaar is zonder scrollen
+    FocusScope.of(context).unfocus();
+    setState(() => _resolving = true);
+    try {
+      final details =
+          await placeDetails(p.placeId, sessionToken: _sessionToken);
+      if (!mounted) return;
+      widget.controller.text = details.formattedAddress;
+      _hasSelected = true;
+      _selectedText = details.formattedAddress;
+      widget.onSelected(details);
+      setState(() {
+        _predictions = const [];
+        _resolving = false;
+        // Nieuwe sessie voor een eventuele tweede zoekopdracht. Volgens
+        // Google's billing-regel: één token per autocomplete-sessie.
+        _sessionToken = newPlacesSessionToken();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _resolving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+            ],
+          ),
+          child: TextField(
+            controller: widget.controller,
+            onChanged: _onTextChanged,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Begin te typen — kies je adres uit de lijst',
+              prefixIcon: const Icon(
+                Icons.location_on_outlined,
+                color: AppColors.primary,
+              ),
+              suffixIcon: (_loading || _resolving)
+                  ? const Padding(
+                      padding: EdgeInsets.all(14),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : (_hasSelected
+                      ? const Icon(
+                          Icons.check_circle,
+                          color: AppColors.primary,
+                        )
+                      : null),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
+        if (_predictions.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+              ],
+            ),
+            child: Column(
+              children: List.generate(_predictions.length, (i) {
+                final p = _predictions[i];
+                final isFirst = i == 0;
+                final isLast = i == _predictions.length - 1;
+                return InkWell(
+                  onTap: _resolving ? null : () => _onPick(p),
+                  borderRadius: BorderRadius.vertical(
+                    top: isFirst ? const Radius.circular(12) : Radius.zero,
+                    bottom: isLast ? const Radius.circular(12) : Radius.zero,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.place_outlined,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            p.description,
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -8141,6 +8731,15 @@ class BookingScreen extends StatefulWidget {
   State<BookingScreen> createState() => _BookingScreenState();
 }
 
+/// Simpel value-object voor "deze paal is bezet tussen X en Y" — puur voor de
+/// UI van BookingScreen. We slaan geen booker-identiteit op, want de boeker
+/// hoeft alleen te weten DAT er iets staat, niet van wie.
+class _BookedRange {
+  final DateTime start; // lokaal
+  final DateTime end; // lokaal
+  const _BookedRange({required this.start, required this.end});
+}
+
 class _BookingScreenState extends State<BookingScreen> {
   DateTime _selectedDate = DateTime.now();
   TimeOfDay? _startTime;
@@ -8151,10 +8750,17 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _loadingSlot = true;
   bool _submitting = false;
 
+  // Bezet-blokken (pending + confirmed) voor de gekozen dag — worden naast de
+  // beschikbaarheidwindow getoond zodat de boeker vooraf ziet welke uren al
+  // vol zitten (fix task #283).
+  List<_BookedRange> _bookedRangesForDay = [];
+  bool _loadingBookings = true;
+
   @override
   void initState() {
     super.initState();
     _loadSlotForSelectedDay();
+    _loadBookedRangesForDay();
   }
 
   @override
@@ -8198,6 +8804,67 @@ class _BookingScreenState extends State<BookingScreen> {
   void _selectDate(DateTime date) {
     setState(() => _selectedDate = date);
     _loadSlotForSelectedDay();
+    _loadBookedRangesForDay();
+  }
+
+  /// Haalt alle nog-actieve boekingen op die (deels) binnen de gekozen dag
+  /// vallen. We filteren geannuleerde/geweigerde eruit — pending + confirmed
+  /// tellen als "bezet". Ranges worden in lokale tijd bewaard voor makkelijk
+  /// tonen; overlap-check verderop rekent ook lokaal.
+  Future<void> _loadBookedRangesForDay() async {
+    setState(() => _loadingBookings = true);
+    try {
+      final dayStartLocal = DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+      );
+      final dayEndLocal = dayStartLocal.add(const Duration(days: 1));
+
+      final data = await supabase
+          .from('bookings')
+          .select('start_time, end_time, status')
+          .eq('charger_id', widget.charger.id)
+          .not('status', 'in', '(cancelled,rejected)')
+          .lt('start_time', dayEndLocal.toUtc().toIso8601String())
+          .gt('end_time', dayStartLocal.toUtc().toIso8601String());
+
+      if (!mounted) return;
+
+      final ranges = (data as List).map((row) {
+        final map = row as Map<String, dynamic>;
+        return _BookedRange(
+          start: DateTime.parse(map['start_time'] as String).toLocal(),
+          end: DateTime.parse(map['end_time'] as String).toLocal(),
+        );
+      }).toList()
+        ..sort((a, b) => a.start.compareTo(b.start));
+
+      setState(() {
+        _bookedRangesForDay = ranges;
+        _loadingBookings = false;
+      });
+    } catch (_) {
+      // Bewuste fail-open: als de fetch faalt, tonen we geen bezet-blokken
+      // maar de server-side conflict-check bij _submit vangt 'm alsnog af.
+      if (mounted) {
+        setState(() {
+          _bookedRangesForDay = [];
+          _loadingBookings = false;
+        });
+      }
+    }
+  }
+
+  /// Standaard overlap-test: [aStart,aEnd) overlapt met [bStart,bEnd) als
+  /// aStart < bEnd EN aEnd > bStart. Zelfde regel als de server-check.
+  bool _rangesOverlap(
+    DateTime aStart,
+    DateTime aEnd,
+    DateTime bStart,
+    DateTime bEnd,
+  ) {
+    return aStart.isBefore(bEnd) && aEnd.isAfter(bStart);
   }
 
   Future<void> _pickStartTime() async {
@@ -8273,6 +8940,25 @@ class _BookingScreenState extends State<BookingScreen> {
     final startDT = _combineDateAndTime(_selectedDate, _startTime!);
     final endDT = _combineDateAndTime(_selectedDate, _endTime!);
 
+    // Snelle client-side overlap-check op basis van de al ingeladen bezet-
+    // blokken — voorkomt een round-trip als de boeker duidelijk een bezet
+    // tijdvak kiest. De server-check verderop blijft leading (race-safety).
+    for (final r in _bookedRangesForDay) {
+      if (_rangesOverlap(startDT, endDT, r.start, r.end)) {
+        final rs = _formatTimeForDisplay(
+          TimeOfDay(hour: r.start.hour, minute: r.start.minute),
+        );
+        final re = _formatTimeForDisplay(
+          TimeOfDay(hour: r.end.hour, minute: r.end.minute),
+        );
+        _showError(
+          'Dit tijdvak overlapt met een bestaande boeking ($rs–$re). '
+          'Kies een tijd buiten de bezette blokken.',
+        );
+        return;
+      }
+    }
+
     setState(() => _submitting = true);
     try {
       // Conflict-check: zoek bestaande boekingen die overlappen met dit tijdvak
@@ -8346,6 +9032,64 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
         );
         return;
+      }
+
+      // -----------------------------------------------------------------
+      // Voertuig-onboarding nudge (task #286): als de boeker nog geen
+      // auto-info in z'n profiel heeft, vraag 'm om die eerst in te
+      // vullen. Niet blocking — user mag "Later" kiezen en dan gaat de
+      // boeking gewoon door. Doel: zoveel mogelijk boekers krijgen
+      // ETA-tracking tijdens hun laadsessie (task #287).
+      // -----------------------------------------------------------------
+      try {
+        final vehicleRow = await supabase
+            .from('profiles')
+            .select('vehicle_battery_capacity_kwh')
+            .eq('id', userId)
+            .maybeSingle();
+        final hasBatteryInfo =
+            vehicleRow != null &&
+                vehicleRow['vehicle_battery_capacity_kwh'] != null;
+        if (!hasBatteryInfo && mounted) {
+          final goToProfile = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Vul je auto in?'),
+              content: const Text(
+                'We kunnen je "% vol" en resterende laadtijd tonen '
+                'tijdens je sessie, maar dan hebben we even je auto '
+                '(model + accu) nodig. Duurt 20 seconden.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Later'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Nu invullen'),
+                ),
+              ],
+            ),
+          );
+          if (goToProfile == true) {
+            if (!mounted) return;
+            setState(() => _submitting = false);
+            // Naar profielscherm; user kan daarna terug naar boeken
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const EditProfileScreen(),
+              ),
+            );
+            // Boeking afbreken — user moet zelf opnieuw op "Boeken" tikken
+            // zodat 'ie z'n keuzes bewust bevestigt.
+            return;
+          }
+        }
+      } catch (_) {
+        // Silent fail: als de check zelf faalt (netwerk, RLS), gaan we
+        // gewoon door met boeken. Nudge is nice-to-have, geen blocker.
       }
 
       await supabase.from('bookings').insert({
@@ -8943,6 +9687,10 @@ class _BookingScreenState extends State<BookingScreen> {
             ],
           ),
         ),
+        // Bezet-blokken voor deze dag (task #283) — direct onder de "beschikbaar"-
+        // banner, boven de tijd-pickers, zodat de boeker vooraf ziet welke uren
+        // al vol zitten voordat-ie een tijd kiest.
+        _bookedSlotsCard(),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -8968,6 +9716,112 @@ class _BookingScreenState extends State<BookingScreen> {
           _durationSummary(),
         ],
       ],
+    );
+  }
+
+  /// Toont de al gereserveerde tijdvakken voor de geselecteerde dag. Geen
+  /// booker-namen — puur "Bezet HH:MM–HH:MM" — zodat andere gebruikers'
+  /// boekingen anoniem blijven.
+  Widget _bookedSlotsCard() {
+    if (_loadingBookings) return const SizedBox.shrink();
+    if (_bookedRangesForDay.isEmpty) return const SizedBox.shrink();
+
+    final dayStart = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
+    final dayEnd = dayStart.add(const Duration(days: 1));
+
+    String rangeLabel(_BookedRange r) {
+      // Clamp naar de dag zelf voor over-middernacht boekingen.
+      final s = r.start.isBefore(dayStart) ? dayStart : r.start;
+      final e = r.end.isAfter(dayEnd) ? dayEnd : r.end;
+      final sLbl = _formatTimeForDisplay(
+        TimeOfDay(hour: s.hour, minute: s.minute),
+      );
+      // Speciaalgeval: eind valt precies op 00:00 volgende dag → toon 24:00
+      final eLbl = (e.year == dayEnd.year &&
+              e.month == dayEnd.month &&
+              e.day == dayEnd.day &&
+              e.hour == 0 &&
+              e.minute == 0)
+          ? '24:00'
+          : _formatTimeForDisplay(
+              TimeOfDay(hour: e.hour, minute: e.minute),
+            );
+      return 'Bezet $sLbl – $eLbl';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.danger.withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.event_busy_rounded,
+                color: AppColors.danger,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Al gereserveerd op deze dag',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.danger,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ..._bookedRangesForDay.map(
+            (r) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: AppColors.danger,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    rangeLabel(r),
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Kies een tijdstip buiten deze blokken.',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: AppColors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -9146,11 +10000,14 @@ class _MyChargersScreenState extends State<MyChargersScreen> {
       return;
     }
     try {
-      final data = await supabase
-          .from('chargers')
-          .select()
-          .eq('owner_id', userId)
-          .order('created_at', ascending: false);
+      // Sinds migratie 0030 heeft authenticated GEEN directe SELECT
+      // meer op public.chargers.lat/lng — dat zou anders elke ingelogde
+      // user in staat stellen om de huisadres-coords van iedere paal
+      // op te vragen. Voor de owner-view (Mijn palen) gebruiken we
+      // daarom de SECURITY DEFINER helper `my_chargers()`: die geeft
+      // álle kolommen terug (incl. lat/lng) — maar alleen voor rijen
+      // waar owner_id = auth.uid(). Zie task #241.
+      final data = await supabase.rpc('my_chargers');
       // Mijn palen — owner ziet altijd exacte locatie.
       final list = (data as List)
           .map((m) => Charger.fromMap(
@@ -9520,6 +10377,17 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   // gebruikt om "Schrijf review" vs. "Beoordeeld" badge te bepalen.
   Set<String> _reviewedBookingIds = {};
 
+  // Voertuig-eigenschappen van de ingelogde user, uit `profiles`. Nodig voor
+  // de LiveChargingCard (task #287): SoC-berekening en effective_kw.
+  // Beide nullable — user hoeft geen voertuig te kiezen (kan ook later).
+  double? _vehicleBatteryKwh;
+  double? _vehicleMaxAcKw;
+
+  // Dev-mode simulatie state: per booking-id de lopende tick-timer én de
+  // transaction_id (nodig om tick + stop RPC's te vuren). Alleen relevant
+  // in kDebugMode — in productie blijft deze map altijd leeg.
+  final Map<String, _FakeSessionCtrl> _fakeSessions = {};
+
   @override
   void initState() {
     super.initState();
@@ -9533,6 +10401,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Stop alle dev-mode fake-session timers (voorkomt Timer-leaks als user
+    // Mijn Boekingen verlaat terwijl er nog een simulatie loopt). We laten
+    // de sessie zelf in de DB doorlopen — een expliciete "Stop" moet de user
+    // triggeren. Dit stopt alleen de client-side tick-loop.
+    for (final ctrl in _fakeSessions.values) {
+      ctrl.tickTimer?.cancel();
+    }
+    _fakeSessions.clear();
     super.dispose();
   }
 
@@ -9565,12 +10441,34 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           .map((r) => (r as Map<String, dynamic>)['booking_id'] as String)
           .toSet();
 
+      // Voertuig-velden uit profiles (task #287): nodig voor de LiveCharging-
+      // Card om SoC en ETA te berekenen. Falen we hier zachtjes — de widget
+      // toont dan nul in plaats van % en ETA en fungeert alsnog.
+      double? vBatteryKwh;
+      double? vMaxAcKw;
+      try {
+        final profileRow = await supabase
+            .from('profiles')
+            .select('vehicle_battery_capacity_kwh, vehicle_max_ac_kw')
+            .eq('id', userId)
+            .maybeSingle();
+        if (profileRow != null) {
+          vBatteryKwh =
+              (profileRow['vehicle_battery_capacity_kwh'] as num?)?.toDouble();
+          vMaxAcKw = (profileRow['vehicle_max_ac_kw'] as num?)?.toDouble();
+        }
+      } catch (_) {
+        // Silent fail — widget verbergt %/ETA-velden dan gewoon
+      }
+
       if (!mounted) return;
       setState(() {
         _bookings = (data as List)
             .map((row) => Booking.fromMap(row as Map<String, dynamic>))
             .toList();
         _reviewedBookingIds = reviewedIds;
+        _vehicleBatteryKwh = vBatteryKwh;
+        _vehicleMaxAcKw = vMaxAcKw;
         _loading = false;
       });
     } catch (e) {
@@ -9602,6 +10500,11 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     if (confirmed != true) return;
 
     try {
+      // Onthouden VOOR de update, anders is booking.status al 'cancelled'
+      // en snappen we niet meer of dit een pending-intrekking was of een
+      // echte annulering — dat verandert de push-copy.
+      final wasPending = booking.status == 'pending';
+
       final updated = await supabase
           .from('bookings')
           .update({'status': 'cancelled'})
@@ -9613,6 +10516,30 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           'Mogelijk is de boeking ondertussen al gewijzigd.',
         );
       }
+
+      // Push naar de eigenaar — die had de aanvraag/boeking in z'n inbox
+      // staan en wil weten dat die weer vrij is (voor het geval iemand
+      // anders wacht op dat slot). Fire-and-forget; mag flow niet blokkeren.
+      final ownerId = booking.charger?.ownerId;
+      if (ownerId != null) {
+        final chargerName = booking.charger?.name ?? 'je laadpaal';
+        final bookerName = (booking.userName?.trim().isNotEmpty ?? false)
+            ? booking.userName!.trim()
+            : 'De boeker';
+        // ignore: unawaited_futures
+        PluggoPush.sendTo(
+          userId: ownerId,
+          title: wasPending ? 'Aanvraag ingetrokken' : 'Boeking geannuleerd',
+          body: wasPending
+              ? '$bookerName trok de aanvraag voor $chargerName in.'
+              : '$bookerName heeft de boeking bij $chargerName geannuleerd.',
+          data: {
+            'type': 'booking_cancelled_by_booker',
+            'booking_id': booking.id,
+          },
+        );
+      }
+
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -10374,6 +11301,59 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 ),
               ],
             ),
+            // Live laadschatting (task #287): inline widget die tijdens een
+            // actieve OCPP-sessie verschijnt. Toont niks als er geen sessie
+            // is (widget detecteert zelf). Prijs komt uit charger — bookerprijs
+            // is inclusief service fee.
+            if (booking.status == 'confirmed' && charger != null) ...[
+              const SizedBox(height: 10),
+              LiveChargingCard(
+                bookingId: booking.id,
+                chargerMaxKw: charger.maxPowerKw,
+                vehicleBatteryKwh: _vehicleBatteryKwh,
+                vehicleMaxAcKw: _vehicleMaxAcKw,
+                startSocPct: booking.startSocPct,
+                targetSocPct: booking.targetSocPct,
+                pricePerKwh: bookerPricePerKwh(charger.price),
+                onOpenProfile: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const EditProfileScreen(),
+                    ),
+                  );
+                  if (mounted) _load();
+                },
+              ),
+            ],
+            // OCPP start/stop (task #293): "Start laden nu" / "Stop laden nu"
+            // voor palen die daadwerkelijk aan het CSMS gekoppeld zijn.
+            //
+            // Zichtbaar wanneer:
+            //   - de boeking bevestigd is
+            //   - de paal een OCPP-koppeling heeft (ocpp_charger_id != null)
+            //   - het boekingsvenster nog niet definitief voorbij is
+            //
+            // De strakke tijdsvenster-controle (2 min early, 5 min late) doet
+            // remote-start-session zelf; wij tonen 'm alleen ook tijdens de
+            // sessie zodat "Stop laden nu" beschikbaar blijft tot de paal een
+            // StopTransaction bevestigt. Voor niet-OCPP palen zit er
+            // sowieso geen knop — die worden nog handmatig aan/uit gedaan.
+            if (booking.status == 'confirmed' &&
+                charger != null &&
+                charger.ocppChargerId != null &&
+                !isPast) ...[
+              const SizedBox(height: 10),
+              _OcppSessionControls(booking: booking),
+            ],
+            // Dev-mode "Simuleer sessie" — alleen in debug builds. Laat testers
+            // de LiveChargingCard triggeren zonder fysieke paal (VPS #266 en
+            // paal #273 zijn nog in aanbouw). Zie migratie 0024.
+            if (kDebugMode &&
+                booking.status == 'confirmed' &&
+                !isPast) ...[
+              const SizedBox(height: 8),
+              _fakeSessionControls(booking),
+            ],
             // Pay-after-charge: boeking is voorbij maar owner heeft
             // nog geen kWh ingevuld. Boeker wacht op afrekening.
             if (booking.awaitingKwhInput) ...[
@@ -10635,6 +11615,384 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       ),
     );
   }
+
+  // --------------------------------------------------------------------------
+  // Dev-mode fake-session controls (task #287)
+  //
+  // Rendert één van drie states:
+  //   1. "Simuleer sessie" knop — nog geen sessie loopt voor deze boeking
+  //   2. "Stop simulatie" knop — sessie loopt (client-side ticker actief)
+  //   3. Foutmelding onderin als een RPC-call faalt
+  //
+  // Alle logica praat met migratie 0024 RPCs (dev_start / dev_tick / dev_stop).
+  // Ticker loopt elke 5s en voegt 150 Wh toe (~11 kW gemiddeld) — realistisch
+  // voor een 11kW paal + 11kW auto scenario.
+  // --------------------------------------------------------------------------
+  Widget _fakeSessionControls(Booking booking) {
+    final ctrl = _fakeSessions[booking.id];
+    final isRunning = ctrl != null && ctrl.tickTimer != null;
+
+    return Row(
+      children: [
+        Icon(
+          isRunning
+              ? Icons.stop_circle_outlined
+              : Icons.play_circle_outline_rounded,
+          size: 16,
+          color: const Color(0xFF9E9E9E),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'DEV: ${isRunning ? 'Simulatie draait' : 'Geen live sessie'}',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: const Color(0xFF9E9E9E),
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: isRunning
+              ? () => _stopFakeSession(booking.id)
+              : () => _startFakeSession(booking.id),
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            foregroundColor: isRunning
+                ? AppColors.danger
+                : const Color(0xFF34C759),
+            textStyle: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          child: Text(isRunning ? 'Stop simulatie' : 'Simuleer sessie'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _startFakeSession(String bookingId) async {
+    try {
+      final result = await supabase
+          .rpc('dev_start_fake_session', params: {'p_booking_id': bookingId});
+      final txId = result is int ? result : (result as num).toInt();
+
+      // Ticker registreren — vult meter_current_wh elke 5s met +15 Wh
+      // (~11 kW gemiddeld). Rekensom: 11 kW · 5 s = 55.000 Ws = 15,28 Wh.
+      // Realtime-subscribe in de widget pikt 't op.
+      final timer = Timer.periodic(const Duration(seconds: 5), (_) async {
+        try {
+          await supabase.rpc(
+            'dev_tick_fake_session',
+            params: {'p_transaction_id': txId, 'p_add_wh': 15},
+          );
+        } catch (_) {
+          // Silent — sessie is misschien handmatig gestopt in DB
+        }
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _fakeSessions[bookingId] =
+            _FakeSessionCtrl(transactionId: txId, tickTimer: timer);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Simulatie start faalde: $e')),
+      );
+    }
+  }
+
+  Future<void> _stopFakeSession(String bookingId) async {
+    final ctrl = _fakeSessions[bookingId];
+    if (ctrl == null) return;
+    ctrl.tickTimer?.cancel();
+    try {
+      await supabase.rpc(
+        'dev_stop_fake_session',
+        params: {'p_transaction_id': ctrl.transactionId},
+      );
+    } catch (_) {
+      // Silent — als 'ie al gestopt is is dat OK
+    }
+    if (!mounted) return;
+    setState(() {
+      _fakeSessions.remove(bookingId);
+    });
+  }
+}
+
+/// Handle om een lopende dev-mode fake-session te tracken: transaction_id
+/// (nodig voor tick + stop RPCs) + de Timer die elke X seconden een tick
+/// vuurt. Cancel de Timer → tick-loop stopt (maar de sessie zelf loopt door
+/// tot expliciete stop-RPC).
+class _FakeSessionCtrl {
+  _FakeSessionCtrl({required this.transactionId, required this.tickTimer});
+
+  final int transactionId;
+  Timer? tickTimer;
+}
+
+// ============================================================================
+// _OcppSessionControls — task #293
+//
+// Toont op de boekingskaart één van twee knoppen, afhankelijk van of er op dit
+// moment een actieve OCPP-sessie loopt voor de boeking:
+//   • Geen actieve sessie → "Start laden nu"  (roept remote-start-session aan)
+//   • Actieve sessie      → "Stop laden nu"   (roept remote-stop-session aan)
+//
+// De edge functions praten met de CSMS (Hetzner VPS #266) en die stuurt een
+// RemoteStartTransaction / RemoteStopTransaction naar de fysieke paal. De
+// paal accepteert of weigert; wij tonen die uitkomst als SnackBar.
+//
+// Realtime houdt de knop-state in sync: zodra de paal een StartTransaction /
+// StopTransaction terugstuurt, verandert charging_sessions.status in de DB
+// en flippen we de knop binnen ~1s. Belangrijk voor UX omdat er tussen
+// "app zegt 'Accepted'" en "sessie loopt écht" nog een control-pilot-dans
+// zit die enkele seconden kost.
+//
+// Zichtbaar alleen wanneer de parent besluit dat de context klopt (booking
+// confirmed, charger heeft ocpp_charger_id, boekingsvenster nog niet
+// verstreken). Deze widget doet zelf géén tijdsvenster-check — die zit in
+// remote-start-session (2 min early, 5 min late) en zou hier alleen maar
+// dubbelop-ruis geven.
+// ============================================================================
+class _OcppSessionControls extends StatefulWidget {
+  const _OcppSessionControls({Key? key, required this.booking})
+      : super(key: key);
+
+  final Booking booking;
+
+  @override
+  State<_OcppSessionControls> createState() => _OcppSessionControlsState();
+}
+
+class _OcppSessionControlsState extends State<_OcppSessionControls> {
+  final _supa = Supabase.instance.client;
+
+  // Realtime-listener op charging_sessions gefilterd op booking_id. Bij elke
+  // wijziging (INSERT bij StartTransaction, UPDATE bij StopTransaction /
+  // meter-tick) herladen we de "is er een actieve sessie"-check.
+  RealtimeChannel? _channel;
+
+  bool _hasActive = false;
+  bool _initialized = false; // false tot _loadActive() minstens één keer klaar is
+  bool _busy = false; // knop in-flight — voorkomt dubbeltaps
+
+  @override
+  void initState() {
+    super.initState();
+    _loadActive();
+    _subscribe();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OcppSessionControls old) {
+    super.didUpdateWidget(old);
+    // Andere boeking rendert deze widget nu? Reset state + resubscribe.
+    if (old.booking.id != widget.booking.id) {
+      _channel?.unsubscribe();
+      _channel = null;
+      _hasActive = false;
+      _initialized = false;
+      _loadActive();
+      _subscribe();
+    }
+  }
+
+  @override
+  void dispose() {
+    _channel?.unsubscribe();
+    super.dispose();
+  }
+
+  Future<void> _loadActive() async {
+    try {
+      final row = await _supa
+          .from('charging_sessions')
+          .select('transaction_id, status')
+          .eq('booking_id', widget.booking.id)
+          .eq('status', 'in_progress')
+          .order('started_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() {
+        _hasActive = row != null;
+        _initialized = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      // Fout tijdens de check: laat de knop op "Start" staan als default
+      // (leest natuurlijker dan een greyed-out knop en de edge function
+      // slaat een dubbelstart alsnog af als er tóch al een sessie loopt).
+      setState(() => _initialized = true);
+    }
+  }
+
+  void _subscribe() {
+    _channel = _supa
+        .channel('ocpp_ctrl_${widget.booking.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'charging_sessions',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'booking_id',
+            value: widget.booking.id,
+          ),
+          callback: (_) {
+            if (!mounted) return;
+            // Simpelst en correct bij zowel INSERT (StartTransaction),
+            // UPDATE (StopTransaction / meter-tick), als DELETE.
+            _loadActive();
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _remoteStart() async {
+    await _invokeRemote(
+      fn: 'remote-start-session',
+      okMsg: 'Laadopdracht verstuurd — de paal begint zo met laden.',
+      declinedFallback:
+          'De paal wees het startverzoek af. Probeer het opnieuw.',
+      networkFallback: 'Kon niet starten — check je internetverbinding.',
+    );
+  }
+
+  Future<void> _remoteStop() async {
+    await _invokeRemote(
+      fn: 'remote-stop-session',
+      okMsg: 'Stop-opdracht verstuurd — sessie sluit zo af.',
+      declinedFallback:
+          'De paal wees het stopverzoek af. Probeer het opnieuw.',
+      networkFallback: 'Kon niet stoppen — check je internetverbinding.',
+    );
+  }
+
+  // Gedeelde invoke-flow: zowel remote-start als remote-stop retourneren
+  // hetzelfde antwoord-schema { accepted, ocppResponse, reason?, error? }
+  // en kunnen op precies dezelfde paden falen.
+  Future<void> _invokeRemote({
+    required String fn,
+    required String okMsg,
+    required String declinedFallback,
+    required String networkFallback,
+  }) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final res = await _supa.functions.invoke(
+        fn,
+        body: {'booking_id': widget.booking.id},
+      );
+
+      // supabase_flutter gooit soms géén FunctionException bij non-2xx
+      // (afhankelijk van SDK-versie) — check zelf ook de status. Ons
+      // edge-functie-schema: 200 = accepted, 409 = declined (met reason),
+      // 4xx/5xx overig = error (met error-message).
+      final status = res.status ?? 0;
+      final data = res.data;
+      if (status >= 400) {
+        if (!mounted) return;
+        _toast(_reasonFrom(data) ?? declinedFallback);
+        return;
+      }
+
+      final accepted = data is Map && data['accepted'] == true;
+      if (!mounted) return;
+      _toast(accepted ? okMsg : (_reasonFrom(data) ?? declinedFallback));
+    } on FunctionException catch (e) {
+      // Nieuwere supabase_flutter-versies gooien dit voor non-2xx. De
+      // .details bevat de geparste response body — daar zit onze reason /
+      // error in.
+      if (!mounted) return;
+      _toast(_reasonFrom(e.details) ?? declinedFallback);
+    } catch (_) {
+      if (!mounted) return;
+      _toast(networkFallback);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  // Peuter een leesbaar bericht uit de edge-function response — we accepteren
+  // zowel { reason: "..." } (409-pad, expliciete OCPP-rejection) als
+  // { error: "..." } (400/500-pad).
+  String? _reasonFrom(dynamic data) {
+    if (data is Map) {
+      final r = data['reason'];
+      if (r is String && r.trim().isNotEmpty) return r;
+      final e = data['error'];
+      if (e is String && e.trim().isNotEmpty) return e;
+    }
+    return null;
+  }
+
+  void _toast(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Zolang de eerste session-lookup nog loopt: reserveer alvast de ruimte
+    // maar toon nog geen knop, om te voorkomen dat we per ongeluk "Start"
+    // laten zien terwijl er al een sessie draait. Voelt korter dan het lijkt
+    // (~200ms op WiFi).
+    if (!_initialized) {
+      return const SizedBox(height: 44);
+    }
+
+    final isStart = !_hasActive;
+    final Color color = isStart ? AppColors.primary : AppColors.danger;
+    final IconData icon =
+        isStart ? Icons.play_arrow_rounded : Icons.stop_rounded;
+    final String label = _busy
+        ? 'Bezig…'
+        : (isStart ? 'Start laden nu' : 'Stop laden nu');
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _busy ? null : (isStart ? _remoteStart : _remoteStop),
+        icon: _busy
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(icon, size: 18, color: color),
+        label: Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          side: BorderSide(color: color.withOpacity(0.5)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ============================================================================
@@ -10665,6 +12023,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool _isPioneer = false;
   DateTime? _pioneerSince;
 
+  // Voertuig-velden (task #286) — gaan naar profiles.vehicle_*.
+  // Nodig voor Live ETA-berekening (task #287) en auto-stop op target-SoC
+  // (task #289). Alle drie optioneel opslaan: user mag ze leeg laten,
+  // maar dan valt de app terug op conservatieve schattingen op basis van
+  // gemeten laadtempo.
+  late final TextEditingController _vehicleModelController;
+  late final TextEditingController _vehicleBatteryKwhController;
+  late final TextEditingController _vehicleMaxAcKwController;
+
   @override
   void initState() {
     super.initState();
@@ -10674,9 +12041,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       text: (meta?['full_name'] as String?) ?? '',
     );
     _ibanController = TextEditingController();
+    _vehicleModelController = TextEditingController();
+    _vehicleBatteryKwhController = TextEditingController();
+    _vehicleMaxAcKwController = TextEditingController();
     _currentAvatarUrl = meta?['avatar_url'] as String?;
-    // IBAN + Pionier-status staan in profiles — niet in user_metadata.
-    // Async laden in één call.
+    // IBAN + Pionier-status + voertuig-velden staan in profiles — niet in
+    // user_metadata. Async laden in één call.
     _loadProfileExtras();
   }
 
@@ -10689,7 +12059,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     try {
       final row = await supabase
           .from('profiles')
-          .select('iban, is_pioneer, pioneer_since')
+          .select(
+            'iban, is_pioneer, pioneer_since, '
+            'vehicle_model, vehicle_battery_capacity_kwh, vehicle_max_ac_kw',
+          )
           .eq('id', user.id)
           .maybeSingle();
       if (!mounted) return;
@@ -10700,17 +12073,193 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final iban = row['iban'] as String?;
       final pioneer = row['is_pioneer'] as bool? ?? false;
       final since = row['pioneer_since'] as String?;
+      final vehicleModel = row['vehicle_model'] as String?;
+      // numeric-kolommen komen via Supabase soms als num (int/double) en
+      // soms als String terug (afhankelijk van de decoder). Robuust parsen.
+      final batteryKwh = _asDouble(row['vehicle_battery_capacity_kwh']);
+      final maxAcKw = _asDouble(row['vehicle_max_ac_kw']);
       setState(() {
         if (iban != null && iban.isNotEmpty) {
           _ibanController.text = prettyIban(iban);
         }
         _isPioneer = pioneer;
         _pioneerSince = since != null ? DateTime.tryParse(since) : null;
+        if (vehicleModel != null && vehicleModel.isNotEmpty) {
+          _vehicleModelController.text = vehicleModel;
+        }
+        if (batteryKwh != null) {
+          _vehicleBatteryKwhController.text = _prettyKwh(batteryKwh);
+        }
+        if (maxAcKw != null) {
+          _vehicleMaxAcKwController.text = _prettyKwh(maxAcKw);
+        }
         _loadingIban = false;
       });
     } catch (_) {
       if (mounted) setState(() => _loadingIban = false);
     }
+  }
+
+  /// Robuust dubbel-parsen: Supabase geeft numeric-kolommen soms als int,
+  /// soms als double, soms als String terug.
+  double? _asDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
+
+  /// Format 77.0 → "77", 6.6 → "6.6" (geen trailing .0).
+  String _prettyKwh(double v) {
+    if (v == v.roundToDouble()) return v.toInt().toString();
+    return v.toStringAsFixed(1);
+  }
+
+  /// Parseert een user-input string als kWh-getal. Accepteert zowel komma
+  /// als punt als decimaal-separator (NL-gebruikers typen vaak "7,4").
+  /// Lege string of niet-parseable → null.
+  double? _parseKwh(String raw) {
+    final s = raw.trim().replaceAll(',', '.');
+    if (s.isEmpty) return null;
+    return double.tryParse(s);
+  }
+
+  /// Toont een bottom-sheet met de preset-lijst. Bij tap: vult model +
+  /// capacity + AC-kW in de bijbehorende velden. Sentinel "Anders /
+  /// handmatig" leegt alles zodat de user zelf kan typen.
+  void _showVehiclePicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return Column(
+              children: [
+                // Sleep-handle
+                const SizedBox(height: 8),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Kies je auto',
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Zodat we je laadtijd en % vol goed kunnen schatten',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    // +1 voor "Anders / handmatig" sentinel bovenaan.
+                    itemCount: kVehiclePresets.length + 1,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, color: AppColors.divider),
+                    itemBuilder: (context, i) {
+                      // Eerste item = "Anders / handmatig" sentinel.
+                      // Bovenaan i.p.v. onderaan zodat wie 'm nodig heeft
+                      // niet 30+ items hoeft door te scrollen.
+                      if (i == 0) {
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(
+                            Icons.edit_outlined,
+                            color: AppColors.primary,
+                          ),
+                          title: Text(
+                            'Anders / handmatig invullen',
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Vul zelf model, accu en AC-vermogen in',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            setState(() {
+                              _vehicleModelController.clear();
+                              _vehicleBatteryKwhController.clear();
+                              _vehicleMaxAcKwController.clear();
+                            });
+                          },
+                        );
+                      }
+                      final preset = kVehiclePresets[i - 1];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(
+                          Icons.directions_car_rounded,
+                          color: AppColors.primary,
+                        ),
+                        title: Text(
+                          preset.model,
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${_prettyKwh(preset.batteryCapacityKwh)} kWh · '
+                          'max ${_prettyKwh(preset.maxAcKw)} kW AC',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          setState(() {
+                            _vehicleModelController.text = preset.model;
+                            _vehicleBatteryKwhController.text =
+                                _prettyKwh(preset.batteryCapacityKwh);
+                            _vehicleMaxAcKwController.text =
+                                _prettyKwh(preset.maxAcKw);
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   /// Gouden banner die alleen verschijnt bij Pluggo Pioniers.
@@ -10778,6 +12327,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _ibanController.dispose();
+    _vehicleModelController.dispose();
+    _vehicleBatteryKwhController.dispose();
+    _vehicleMaxAcKwController.dispose();
     super.dispose();
   }
 
@@ -10842,11 +12394,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final ibanInput = _ibanController.text.trim();
       final ibanToSave =
           ibanInput.isEmpty ? null : normalizeIban(ibanInput);
+
+      // Voertuig-velden (task #286). Alle drie optioneel: lege input = NULL.
+      // Numeric-velden ondersteunen komma of punt als decimaal separator
+      // (NL-gebruikers typen vaak "7,4" ipv "7.4").
+      final vehicleModelInput = _vehicleModelController.text.trim();
+      final vehicleModelToSave =
+          vehicleModelInput.isEmpty ? null : vehicleModelInput;
+      final batteryKwhToSave =
+          _parseKwh(_vehicleBatteryKwhController.text);
+      final maxAcKwToSave = _parseKwh(_vehicleMaxAcKwController.text);
+
       // Upsert: profielen worden normaal door handle_new_user-trigger
       // aangemaakt, maar voor de zekerheid upserten we hier toch.
       await supabase.from('profiles').upsert({
         'id': userId,
         'iban': ibanToSave,
+        'vehicle_model': vehicleModelToSave,
+        'vehicle_battery_capacity_kwh': batteryKwhToSave,
+        'vehicle_max_ac_kw': maxAcKwToSave,
       });
 
       if (!mounted) return;
@@ -11021,6 +12587,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   controller: _ibanController,
                   textCapitalization: TextCapitalization.characters,
                   enabled: !_loadingIban,
+                  // IbanInputFormatter strippt spaties, uppercaset, en zet
+                  // automatisch elke 4 tekens een spatie. Cap op 18 chars
+                  // (NL-IBAN-lengte). Geeft real-time "NL12 ABCD ..." UX
+                  // zonder dat de gebruiker zelf spaties hoeft te typen.
+                  inputFormatters: [IbanInputFormatter()],
                   decoration: InputDecoration(
                     hintText: _loadingIban
                         ? 'Laden…'
@@ -11039,6 +12610,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   validator: (value) {
                     final v = (value ?? '').trim();
                     if (v.isEmpty) return null; // optioneel
+                    // isValidNlIban doet nu zowel structuur als mod-97
+                    // checksum, dus dezelfde foutmelding dekt beide gevallen.
                     if (!isValidNlIban(v)) {
                       return 'Geen geldige Nederlandse IBAN';
                     }
@@ -11092,6 +12665,185 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     fontSize: 12,
                     color: AppColors.textSecondary,
                   ),
+                ),
+                const SizedBox(height: 28),
+                // ============================================
+                // Voertuig — voor Live ETA-berekening (task #287)
+                // en auto-stop bij target-SoC (task #289).
+                // Preset-dropdown vult in één tap capacity + AC-kW
+                // in, maar user mag alles overschrijven of leeg laten.
+                // ============================================
+                Row(
+                  children: [
+                    Text(
+                      'Mijn auto',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.directions_car_rounded,
+                      size: 16,
+                      color: AppColors.primary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Nodig voor accurate laadtijd en % vol tijdens '
+                  'een sessie. Je mag dit later ook invullen.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                // Model — tapbaar veld dat de picker opent
+                Text(
+                  'Model',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // TextFormField met readOnly=true zodat 't keyboard niet
+                // opent maar de picker wél via onTap. De user kan alsnog
+                // via onchange (na "Anders / handmatig") vrije tekst typen.
+                TextFormField(
+                  controller: _vehicleModelController,
+                  readOnly: true,
+                  onTap: _showVehiclePicker,
+                  decoration: InputDecoration(
+                    hintText: 'Kies je auto',
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    suffixIcon: const Icon(
+                      Icons.expand_more_rounded,
+                      color: AppColors.textSecondary,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                // Twee getallen naast elkaar: batterij + max AC-vermogen
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Batterij-capaciteit
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Accu (kWh)',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _vehicleBatteryKwhController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[0-9.,]'),
+                              ),
+                            ],
+                            decoration: InputDecoration(
+                              hintText: 'bijv. 77',
+                              filled: true,
+                              fillColor: AppColors.surface,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                            ),
+                            validator: (value) {
+                              final v = _parseKwh(value ?? '');
+                              if (value == null || value.trim().isEmpty) {
+                                return null; // optioneel
+                              }
+                              if (v == null) return 'Ongeldig getal';
+                              if (v < 5 || v > 250) return '5–250 kWh';
+                              return null;
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Max AC-vermogen
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Max AC (kW)',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _vehicleMaxAcKwController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[0-9.,]'),
+                              ),
+                            ],
+                            decoration: InputDecoration(
+                              hintText: 'bijv. 11',
+                              filled: true,
+                              fillColor: AppColors.surface,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                            ),
+                            validator: (value) {
+                              final v = _parseKwh(value ?? '');
+                              if (value == null || value.trim().isEmpty) {
+                                return null; // optioneel
+                              }
+                              if (v == null) return 'Ongeldig getal';
+                              // DB-constraint: > 0 en <= 43 kW.
+                              if (v <= 0 || v > 43) return 'Max 43 kW';
+                              return null;
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 32),
                 // Opslaan
@@ -12372,11 +14124,21 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
   // IDs van boekingen die deze eigenaar al heeft beoordeeld —
   // gebruikt om "Beoordeel boeker" vs. "Beoordeeld" badge te bepalen.
   Set<String> _reviewedByMeBookingIds = {};
+  // DAC7-status (task #263) — bepaalt of we een BSN/RSIN-banner tonen
+  // bovenaan het inbox-scherm. `null` = nog geladen of niet van toepassing.
+  Dac7Status? _dac7Status;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _refreshDac7Status();
+  }
+
+  Future<void> _refreshDac7Status() async {
+    final status = await fetchDac7StatusSilent();
+    if (!mounted) return;
+    setState(() => _dac7Status = status);
   }
 
   Future<void> _load() async {
@@ -12488,11 +14250,24 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
           : _bookings.isEmpty
               ? _emptyState()
               : RefreshIndicator(
-                  onRefresh: _load,
+                  onRefresh: () async {
+                    await _load();
+                    await _refreshDac7Status();
+                  },
                   color: AppColors.primary,
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
+                      // Task #263 — banner alleen zichtbaar als eigenaar tegen
+                      // of over de DAC7-rapportagedrempel loopt zonder BSN/RSIN.
+                      if (_dac7Status != null &&
+                          _dac7Status!.needsAttention) ...[
+                        Dac7Banner(
+                          status: _dac7Status!,
+                          onSubmitted: _refreshDac7Status,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       if (pending.isNotEmpty) ...[
                         _sectionHeader('Wacht op jou', pending.length),
                         const SizedBox(height: 8),
@@ -13774,6 +15549,23 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
       _load();
       // Fire-and-forget mail naar boeker
       _sendCancelEmailToBooker(b, reason.isEmpty ? null : reason);
+
+      // Push naar de boeker — de mail komt binnen, maar een push is directer.
+      // De reden nemen we bewust NIET in de body op: kan gevoelig zijn en
+      // paste anders vaak toch niet in het notification-oppervlak.
+      final chargerName = b.charger?.name ?? 'de laadpaal';
+      // ignore: unawaited_futures
+      PluggoPush.sendTo(
+        userId: b.userId,
+        title: 'Boeking geannuleerd',
+        body:
+            'De eigenaar heeft je reservering bij $chargerName geannuleerd. '
+            'Bekijk de app voor details.',
+        data: {
+          'type': 'booking_cancelled_by_owner',
+          'booking_id': b.id,
+        },
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -15016,7 +16808,23 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       // AuthGate regelt automatisch de navigatie naar HomeScreen
     } on AuthException catch (e) {
-      _showError(e.message);
+      // Als de gebruiker zijn email nog niet bevestigd heeft, geen ruwe
+      // Supabase-error tonen maar het wachtscherm openen met resend-knop.
+      // Supabase gebruikt code 'email_not_confirmed' (v2 GoTrue).
+      final msg = e.message.toLowerCase();
+      final unconfirmed = e.code == 'email_not_confirmed' ||
+          msg.contains('email not confirmed') ||
+          msg.contains('not confirmed');
+      if (unconfirmed) {
+        if (!mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationPendingScreen(email: email),
+          ),
+        );
+      } else {
+        _showError(e.message);
+      }
     } catch (e) {
       _showError('Er ging iets mis. Probeer het opnieuw.');
     } finally {
@@ -15235,16 +17043,32 @@ class _SignupScreenState extends State<SignupScreen> {
 
     setState(() => _loading = true);
     try {
-      await supabase.auth.signUp(
+      final res = await supabase.auth.signUp(
         email: email,
         password: password,
         // full_name komt terecht in raw_user_meta_data en wordt door onze
         // handle_new_user-trigger in de profiles-tabel gezet
         data: {'full_name': name},
       );
-      // AuthGate regelt automatisch de navigatie naar HomeScreen
       if (!mounted) return;
-      Navigator.of(context).popUntil((route) => route.isFirst);
+
+      // Twee paden afhankelijk van Supabase "Confirm email" instelling:
+      // 1) Confirm email AAN → res.session is null, user moet eerst de
+      //    link in de bevestigingsmail klikken. We sturen 'm naar het
+      //    "check je inbox"-scherm met resend-optie. Voorkomt fake/spam
+      //    accounts.
+      // 2) Confirm email UIT → res.session bestaat al, AuthGate pakt
+      //    het op en navigeert naar HomeScreen. Fallback voor als we
+      //    de toggle ooit uitzetten of in lokale dev.
+      if (res.session == null) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationPendingScreen(email: email),
+          ),
+        );
+      } else {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } on AuthException catch (e) {
       _showError(e.message);
     } catch (e) {
@@ -15408,6 +17232,194 @@ class _SignupScreenState extends State<SignupScreen> {
 }
 
 // ============================================
+// EmailVerificationPendingScreen
+// ----------------------------------------------
+// Toont na signup (of na een login-poging met een onbevestigd account) dat
+// de gebruiker eerst op de link in zijn bevestigingsmail moet klikken.
+// Heeft een resend-knop omdat de eerste mail vaak in spam belandt.
+// Zonder deze stap kan iedereen oneindig fake accounts aanmaken met
+// random emailadressen — kritiek voor abuse-preventie pre-launch.
+// ============================================
+class EmailVerificationPendingScreen extends StatefulWidget {
+  final String email;
+  const EmailVerificationPendingScreen({Key? key, required this.email})
+      : super(key: key);
+
+  @override
+  State<EmailVerificationPendingScreen> createState() =>
+      _EmailVerificationPendingScreenState();
+}
+
+class _EmailVerificationPendingScreenState
+    extends State<EmailVerificationPendingScreen> {
+  bool _resending = false;
+  // Cooldown om resend-spam (en Supabase rate-limits) te voorkomen.
+  // 60s sluit aan bij Supabase's default rate-limit op resend.
+  int _cooldownSeconds = 0;
+  Timer? _cooldownTimer;
+
+  @override
+  void dispose() {
+    _cooldownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startCooldown() {
+    setState(() => _cooldownSeconds = 60);
+    _cooldownTimer?.cancel();
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _cooldownSeconds -= 1);
+      if (_cooldownSeconds <= 0) t.cancel();
+    });
+  }
+
+  Future<void> _resend() async {
+    if (_resending || _cooldownSeconds > 0) return;
+    setState(() => _resending = true);
+    try {
+      await supabase.auth.resend(
+        type: OtpType.signup,
+        email: widget.email,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Nieuwe bevestigingsmail verstuurd'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _startCooldown();
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Er ging iets mis. Probeer het opnieuw.'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded,
+              color: AppColors.textPrimary),
+          // Pop terug naar de auth-root (login/signup), niet naar het
+          // signup-formulier — gebruiker is daar al klaar mee.
+          onPressed: () =>
+              Navigator.of(context).popUntil((route) => route.isFirst),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 40),
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Icon(
+                  Icons.mark_email_read_rounded,
+                  size: 36,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Check je inbox',
+                style: GoogleFonts.inter(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'We hebben een bevestigingsmail gestuurd naar\n${widget.email}.\n\n'
+                'Klik op de link in de mail om je account te activeren. '
+                'Kom daarna terug naar de app en log in.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  color: AppColors.textSecondary,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Tip: check ook je spam-folder.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context)
+                      .popUntil((route) => route.isFirst),
+                  child: const Text('Terug naar inloggen'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: (_resending || _cooldownSeconds > 0) ? null : _resend,
+                child: Text(
+                  _resending
+                      ? 'Verzenden...'
+                      : _cooldownSeconds > 0
+                          ? 'Opnieuw versturen kan over ${_cooldownSeconds}s'
+                          : 'Mail niet ontvangen? Opnieuw versturen',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: (_resending || _cooldownSeconds > 0)
+                        ? AppColors.textSecondary
+                        : AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================
 // ForgotPasswordScreen - stuurt een Supabase reset-email
 // ============================================
 class ForgotPasswordScreen extends StatefulWidget {
@@ -15444,9 +17456,24 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     }
     setState(() => _loading = true);
     try {
-      // Supabase verstuurt een email met een link naar hun hosted reset-pagina.
-      // Voor een MVP is dat prima; deep links naar de app is een vervolgstap.
-      await supabase.auth.resetPasswordForEmail(email);
+      // Supabase verstuurt een email met een verify-link. Na klik verifieert
+      // Supabase de token en redirect naar `redirectTo` — onze eigen statische
+      // reset-pagina op pluggoapp.nl die de nieuwe-wachtwoord-flow afhandelt
+      // via supabase-js. Zonder deze parameter valt Supabase terug op de
+      // default Site URL en landt de user op de homepage (waar niks met de
+      // tokens gebeurt — bug die we op 15 juli 2026 zagen bij Rob D.).
+      //
+      // Deze URL moet ook in Supabase Dashboard → Auth → URL Configuration →
+      // Redirect URLs staan als allowlist-entry, anders weigert Supabase de
+      // redirect. Zie taak #304 en `docs/reset-password.html`.
+      //
+      // Later kunnen we hier een deep-link (pluggo://auth/reset) van maken —
+      // zie taak #245. Deze web-pagina blijft dan fallback voor users die de
+      // app niet geïnstalleerd hebben of op desktop klikken.
+      await supabase.auth.resetPasswordForEmail(
+        email,
+        redirectTo: 'https://pluggoapp.nl/reset-password.html',
+      );
       if (!mounted) return;
       setState(() => _sent = true);
     } on AuthException catch (e) {
@@ -16072,6 +18099,673 @@ class _ChargerCardState extends State<_ChargerCard> {
               fontSize: 11,
               fontWeight: FontWeight.w600,
               color: available ? AppColors.primaryDark : AppColors.danger,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// DAC7 — BSN/RSIN drempelflow (task #263)
+//
+// EU-richtlijn 2021/514 (DAC7) verplicht platforms zoals Pluggo om jaarlijks
+// aan de Belastingdienst te rapporteren welke paaleigenaren >=30 transacties
+// OF >=EUR 2.000 aan payouts hebben gehad in het kalenderjaar. Rapportage
+// vereist het TIN (BSN voor natuurlijke personen, RSIN voor rechtspersonen).
+//
+// Deze code is puur client-side UI + status-fetch. De echte state (drempel-
+// tellers + gecrypteerde BSN-opslag) leeft in migratie 0032 + submit-tin
+// edge function. Zie /supabase/migrations/0032_dac7_bsn_flow.sql.
+//
+// Wettelijk kader NL: art. 10c AWR + art. 8 Uitv.reg. WIB. Wij mogen (en
+// moeten) BSN uitvragen zodra de drempel in zicht komt.
+// ============================================================================
+
+/// Uitkomst van de RPC dac7_status_for_owner() — bepaalt banner-state.
+class Dac7Status {
+  /// promptState is een van:
+  ///   - not_required : nog ver van drempel, banner tonen niet
+  ///   - early_warning: >=75% van drempel bereikt, vriendelijke banner
+  ///   - required    : drempel bereikt EN geen BSN => payouts geblokkeerd
+  ///   - provided    : BSN/RSIN is al aangeleverd
+  final String promptState;
+
+  /// Het jaar waarop de state betrekking heeft (kalender-jaar Europa/Amsterdam).
+  final int reportingYear;
+
+  /// Aantal transacties in dit jaar boven de fiscale timestamp.
+  final int transactionCount;
+
+  /// Totaal owner-payout bedrag in cents (na Pluggo-fee).
+  final int totalAmountCents;
+
+  /// Voorgestelde TIN-soort op basis van business_type — 'bsn' of 'rsin'.
+  final String suggestedTinType;
+
+  /// True zodra dac7_reporting_state.payouts_blocked_at gezet is.
+  final bool payoutsBlocked;
+
+  const Dac7Status({
+    required this.promptState,
+    required this.reportingYear,
+    required this.transactionCount,
+    required this.totalAmountCents,
+    required this.suggestedTinType,
+    required this.payoutsBlocked,
+  });
+
+  bool get needsAttention =>
+      promptState == 'early_warning' || promptState == 'required';
+
+  factory Dac7Status.fromMap(Map<String, dynamic> m) {
+    return Dac7Status(
+      promptState: (m['prompt_state'] as String?) ?? 'not_required',
+      reportingYear: (m['reporting_year'] as num?)?.toInt() ??
+          DateTime.now().year,
+      transactionCount: (m['transaction_count'] as num?)?.toInt() ?? 0,
+      totalAmountCents:
+          (m['total_amount_cents'] as num?)?.toInt() ?? 0,
+      suggestedTinType:
+          (m['suggested_tin_type'] as String?) ?? 'bsn',
+      // De RPC retourneert `payouts_blocked_at` (timestamptz). We converteren
+      // naar boolean: aanwezig => geblokkeerd. Timestamp zelf hebben we in
+      // de UI niet nodig, alleen ja/nee.
+      payoutsBlocked: m['payouts_blocked_at'] != null,
+    );
+  }
+}
+
+/// Silent fetch — geen SnackBar-error, gewoon null teruggeven als er iets misgaat.
+/// De banner-flow is best-effort; als DAC7-status niet ophaalbaar is willen we
+/// de rest van het inbox-scherm niet blokkeren.
+Future<Dac7Status?> fetchDac7StatusSilent() async {
+  try {
+    final data = await supabase.rpc('dac7_status_for_owner');
+    if (data == null) return null;
+    // De RPC retourneert een setof met exact 1 row.
+    if (data is List && data.isNotEmpty) {
+      return Dac7Status.fromMap(data.first as Map<String, dynamic>);
+    }
+    if (data is Map) {
+      return Dac7Status.fromMap(data as Map<String, dynamic>);
+    }
+    return null;
+  } catch (e) {
+    debugPrint('fetchDac7StatusSilent failed: $e');
+    return null;
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Dac7Banner — compacte banner bovenaan de IncomingBookingsScreen.
+//
+// Twee varianten:
+//   • early_warning → gele "iets voorbereiden" banner (Solar-tinten)
+//   • required     → rode "actie vereist" banner (Danger-tinten). Blokkeert
+//                    payouts server-side; hier alleen visueel accent + CTA.
+// ---------------------------------------------------------------------------
+class Dac7Banner extends StatelessWidget {
+  final Dac7Status status;
+  final VoidCallback onSubmitted;
+
+  const Dac7Banner({
+    Key? key,
+    required this.status,
+    required this.onSubmitted,
+  }) : super(key: key);
+
+  bool get _isBlocking => status.promptState == 'required';
+
+  Color get _bg =>
+      _isBlocking ? const Color(0xFFFEEBEB) : AppColors.warningSoft;
+  Color get _border =>
+      _isBlocking ? AppColors.danger : AppColors.warning;
+  Color get _iconColor =>
+      _isBlocking ? AppColors.danger : AppColors.warningDark;
+  Color get _titleColor =>
+      _isBlocking ? AppColors.danger : AppColors.warningDark;
+
+  String get _title => _isBlocking
+      ? 'Actie vereist: belastingnummer aanleveren'
+      : 'Fiscale drempel bijna bereikt';
+
+  String get _body {
+    final tinLabel =
+        status.suggestedTinType == 'rsin' ? 'RSIN' : 'BSN';
+    final euro = (status.totalAmountCents / 100)
+        .toStringAsFixed(2)
+        .replaceAll('.', ',');
+    if (_isBlocking) {
+      return 'Je hebt de DAC7-rapportagedrempel bereikt '
+          '(${status.transactionCount} boekingen of €$euro in ${status.reportingYear}). '
+          'Volgens EU-richtlijn 2021/514 en art. 10c AWR moeten we je '
+          '$tinLabel aanleveren aan de Belastingdienst. Nieuwe boekingen '
+          'kunnen pas weer afgerekend worden zodra je je $tinLabel invult.';
+    }
+    return 'Je zit op ${status.transactionCount} boekingen / €$euro in ${status.reportingYear}. '
+        'Bij overschrijding van de DAC7-drempel (30 boekingen of €2.000) '
+        'moeten we je $tinLabel bij de Belastingdienst aanleveren. '
+        'Alvast invullen voorkomt een tijdelijke payout-pauze.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border.withOpacity(0.35)),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                _isBlocking
+                    ? Icons.gpp_maybe_rounded
+                    : Icons.info_outline_rounded,
+                color: _iconColor,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _titleColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _body,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              height: 1.4,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    _isBlocking ? AppColors.danger : AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+              ),
+              onPressed: () async {
+                final result = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => Dac7TinPromptScreen(
+                      suggestedTinType: status.suggestedTinType,
+                      reportingYear: status.reportingYear,
+                    ),
+                  ),
+                );
+                if (result == true) onSubmitted();
+              },
+              child: Text(
+                status.suggestedTinType == 'rsin'
+                    ? 'RSIN invullen'
+                    : 'BSN invullen',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dac7TinPromptScreen — formulier voor BSN/RSIN aanlevering.
+//
+// UX-vereisten (juridisch + productioneel):
+//   • Duidelijke disclosure van grondslag (art. 10c AWR + DAC7).
+//   • Uitleg dat Pluggo BSN encrypted opslaat, NIET plaintext.
+//   • 11-proef live preview zodat gebruiker tikfouten zelf ziet.
+//   • Format-hint: spaties/streepjes toegestaan, worden gestript.
+//   • Onvoltooide submit blokkeert; alleen bij geldige 11-proef.
+//
+// Submitten gaat via de `submit-tin` edge function — die valideert
+// nogmaals, encrypt met AES-256-GCM en zet payouts_blocked_at op null.
+// ---------------------------------------------------------------------------
+class Dac7TinPromptScreen extends StatefulWidget {
+  final String suggestedTinType;
+  final int reportingYear;
+
+  const Dac7TinPromptScreen({
+    Key? key,
+    required this.suggestedTinType,
+    required this.reportingYear,
+  }) : super(key: key);
+
+  @override
+  State<Dac7TinPromptScreen> createState() => _Dac7TinPromptScreenState();
+}
+
+class _Dac7TinPromptScreenState extends State<Dac7TinPromptScreen> {
+  late final TextEditingController _tinCtrl;
+  late String _tinType;
+  bool _submitting = false;
+  String? _validationMsg;
+
+  @override
+  void initState() {
+    super.initState();
+    _tinCtrl = TextEditingController();
+    _tinType = widget.suggestedTinType;
+    _tinCtrl.addListener(_recomputeValidation);
+  }
+
+  @override
+  void dispose() {
+    _tinCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Elfproef: gewichten [9,8,7,6,5,4,3,2,-1], som mod 11 == 0.
+  /// Werkt voor zowel BSN (natuurlijk persoon) als RSIN (rechtspersoon).
+  bool _isValidElfproef(String digits) {
+    if (digits.length != 9) return false;
+    if (!RegExp(r'^\d{9}$').hasMatch(digits)) return false;
+    // Eerste cijfer 0 mag niet — dan is het feitelijk 8-digit nummer
+    // (Belastingdienst hanteert dit voor RSIN historisch wel eens, maar
+    // voor DAC7-aanlevering vereisen we een 9-digit representatie).
+    const weights = [9, 8, 7, 6, 5, 4, 3, 2, -1];
+    var sum = 0;
+    for (var i = 0; i < 9; i++) {
+      sum += int.parse(digits[i]) * weights[i];
+    }
+    return sum % 11 == 0;
+  }
+
+  String _stripped() => _tinCtrl.text.replaceAll(RegExp(r'[\s-]'), '');
+
+  void _recomputeValidation() {
+    final stripped = _stripped();
+    setState(() {
+      if (stripped.isEmpty) {
+        _validationMsg = null;
+      } else if (!RegExp(r'^\d+$').hasMatch(stripped)) {
+        _validationMsg = 'Alleen cijfers (spaties/streepjes worden gestript)';
+      } else if (stripped.length < 9) {
+        _validationMsg = 'Nog ${9 - stripped.length} cijfers te gaan';
+      } else if (stripped.length > 9) {
+        _validationMsg = 'Te lang — een BSN/RSIN is 9 cijfers';
+      } else if (!_isValidElfproef(stripped)) {
+        _validationMsg = 'Elfproef klopt niet — check op tikfout';
+      } else {
+        _validationMsg = null;
+      }
+    });
+  }
+
+  bool get _canSubmit {
+    final s = _stripped();
+    return !_submitting && s.length == 9 && _isValidElfproef(s);
+  }
+
+  Future<void> _submit() async {
+    if (!_canSubmit) return;
+    setState(() => _submitting = true);
+    try {
+      final res = await supabase.functions.invoke(
+        'submit-tin',
+        body: {
+          'tin': _stripped(),
+          'tin_type': _tinType,
+        },
+      );
+      final status = res.status ?? 0;
+      if (status >= 400) {
+        final msg = _errorMsgFrom(res.data) ??
+            'Kon $_tinType niet opslaan (status $status)';
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+      if (!mounted) return;
+      final data = res.data;
+      final last4 =
+          (data is Map ? data['tin_last4'] as String? : null) ?? '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Bedankt — ${_tinType.toUpperCase()} eindigend op $last4 is veilig opgeslagen.',
+          ),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Netwerkfout: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  String? _errorMsgFrom(dynamic data) {
+    if (data is Map) {
+      final e = data['error'];
+      if (e is String && e.isNotEmpty) return e;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tinLabel = _tinType == 'rsin' ? 'RSIN' : 'BSN';
+    final tinHelp = _tinType == 'rsin'
+        ? 'Fiscaal nummer voor rechtspersonen (BV / stichting / VvE). '
+            'Staat op je KvK-uittreksel of op post van de Belastingdienst.'
+        : 'Je Burgerservicenummer — 9 cijfers, staat op je paspoort, '
+            'ID-kaart of DigiD-post.';
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Text('$tinLabel aanleveren'),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        foregroundColor: AppColors.textPrimary,
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Wettelijke disclosure — MOET zichtbaar zijn voordat we
+              // een BSN uitvragen. Grondslag: art. 10c AWR + Uitv.reg. WIB
+              // + EU-richtlijn 2021/514 (DAC7). Zonder deze uitleg mag
+              // Pluggo geen BSN vragen (privacy-verplichting AVG art. 13).
+              _disclosureCard(),
+              const SizedBox(height: 20),
+              _tinTypeSelector(),
+              const SizedBox(height: 20),
+              Text(
+                '$tinLabel invullen',
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                tinHelp,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _tinCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 13, // 9 cijfers + 4 potentieel spaties/streepjes
+                autofocus: true,
+                style: GoogleFonts.robotoMono(
+                  fontSize: 18,
+                  letterSpacing: 2,
+                ),
+                decoration: InputDecoration(
+                  labelText: tinLabel,
+                  hintText: '123 456 789',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  counterText: '',
+                  errorText: _validationMsg,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _securityCard(),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    disabledBackgroundColor:
+                        AppColors.textSecondary.withOpacity(0.3),
+                  ),
+                  onPressed: _canSubmit ? _submit : null,
+                  child: _submitting
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text(
+                          'Veilig opslaan',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed:
+                    _submitting ? null : () => Navigator.pop(context, false),
+                child: const Text('Later — terug'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _disclosureCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.primarySoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.gavel_rounded,
+                color: AppColors.primaryDark,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Waarom vragen we dit?',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primaryDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'EU-richtlijn 2021/514 (DAC7) verplicht Pluggo om over ${widget.reportingYear} '
+            'aan de Nederlandse Belastingdienst te rapporteren welke '
+            'paaleigenaren ≥30 boekingen of ≥€2.000 aan payouts hebben '
+            'gehad. Rapportage vereist je BSN (particulier / eenmanszaak) '
+            'of RSIN (BV / stichting / VvE).',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              height: 1.45,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Grondslag: art. 10c AWR + art. 8 Uitv.reg. WIB. Zonder BSN/RSIN '
+            'mogen we je payouts tijdelijk pauzeren totdat je aanlevert.',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tinTypeSelector() {
+    return Row(
+      children: [
+        Expanded(
+          child: _tinTypeChip(
+            value: 'bsn',
+            label: 'BSN',
+            sub: 'Particulier / eenmanszaak',
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _tinTypeChip(
+            value: 'rsin',
+            label: 'RSIN',
+            sub: 'BV / stichting / VvE',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _tinTypeChip({
+    required String value,
+    required String label,
+    required String sub,
+  }) {
+    final selected = _tinType == value;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () {
+        setState(() => _tinType = value);
+        _recomputeValidation();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primarySoft : AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? AppColors.primary
+                : AppColors.divider,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: selected
+                    ? AppColors.primaryDark
+                    : AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              sub,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _securityCard() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.shield_moon_rounded,
+            size: 18,
+            color: AppColors.primaryDark,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Je BSN/RSIN wordt AES-256-GCM versleuteld opgeslagen in onze '
+              'database. Alleen ons rapportageproces richting de '
+              'Belastingdienst kan de waarde ontsleutelen — niet Pluggo-medewerkers, '
+              'niet ondersteuning en niet andere gebruikers. In de app tonen we '
+              'alleen de laatste 4 cijfers ter bevestiging.',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                height: 1.4,
+                color: AppColors.textSecondary,
+              ),
             ),
           ),
         ],
