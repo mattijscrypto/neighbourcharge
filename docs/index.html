@@ -284,6 +284,54 @@
       border-radius: 8px;
       font-weight: 600 !important;
     }
+    .nav-dropdown {
+      position: relative;
+      display: inline-block;
+    }
+    .nav-dropdown > a {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .nav-dropdown > a::after {
+      content: "▾";
+      font-size: 11px;
+      opacity: 0.6;
+    }
+    .nav-dropdown-menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+      min-width: 240px;
+      z-index: 200;
+      padding: 6px 0;
+    }
+    .nav-dropdown:hover .nav-dropdown-menu,
+    .nav-dropdown:focus-within .nav-dropdown-menu {
+      display: block;
+    }
+    .nav-dropdown-menu a {
+      display: block;
+      padding: 10px 18px;
+      color: var(--text) !important;
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      margin: 0;
+      white-space: nowrap;
+    }
+    .nav-dropdown-menu a:hover {
+      background: var(--primary-light);
+      color: var(--primary) !important;
+    }
+    @media (max-width: 600px) {
+      .nav-dropdown { display: none; }
+    }
 
     /* ---------- HERO ---------- */
     .hero {
@@ -1045,7 +1093,15 @@
         <a href="#wat-is-pluggo">Wat is Pluggo</a>
         <a href="#hoe-werkt-het">Hoe werkt het</a>
         <a href="#slim-laden">Slim laden</a>
-        <a href="#oprichter">Oprichter</a>
+        <div class="nav-dropdown">
+          <a href="#gidsen">Gidsen</a>
+          <div class="nav-dropdown-menu">
+            <a href="./goedkoop-laden.html">Goedkoop elektrisch laden bij de buren</a>
+            <a href="./laadpaal-verhuren.html">Laadpaal verhuren aan buren</a>
+            <a href="./zonnepanelen-verdienen.html">Geld verdienen met zonnepanelen</a>
+            <a href="./welke-laadpaal-werkt.html">Werkt mijn laadpaal op Pluggo?</a>
+          </div>
+        </div>
         <a href="#faq">FAQ</a>
         <a href="#meedoen" class="nav-cta">Doe mee</a>
       </div>
@@ -1526,6 +1582,23 @@
         <summary>Werkt Pluggo op alle laadpalen?</summary>
         <p>In de basis, ja — elke privélaadpaal met een Type 2-aansluiting (de standaard in Europa) kan op Pluggo. Je hoeft geen "smart" paal te hebben, geen OCPP-koppeling, geen backoffice-abonnement: de boekingen lopen via onze app, niet via de paal zelf. We werken met merken als Alfen, Wallbox, Easee, EVBox, Heidelberg, Schneider en alle andere gangbare thuis-laadpalen.</p>
         <p>Wat de paal wél moet kunnen: <strong>vrij-laden modus</strong>, zodat de boeker kan starten zonder dat hij jouw laadpas of app nodig heeft. Hoe je dat per merk instelt, zie je verderop in deze FAQ. Heb je een paal die alleen via een specifieke laadpas-provider werkt en die je niet kunt overzetten naar vrij-laden? Mail ons op <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a> — we kijken graag mee of er een workaround is.</p>
+        <p>Heb je een slimme OCPP-paal? Dan kun je hem voor extra functionaliteit rechtstreeks aan Pluggo koppelen — zie de volgende vraag.</p>
+      </details>
+
+      <details>
+        <summary>Ik heb een slimme paal met OCPP — kan ik die koppelen?</summary>
+        <p>Ja. Als je paal OCPP 1.6J ondersteunt (dat geldt voor de meeste moderne Alfen-, Wallbox-, Easee- en EVBox-modellen), kun je hem rechtstreeks aan Pluggo koppelen voor een aantal extra voordelen:</p>
+        <ul>
+          <li><strong>Live laadtegel:</strong> terwijl een boeker aan het laden is, zie jij in je dashboard in real-time het aantal kWh, het huidige vermogen en de laadduur. Na afloop vult Pluggo het kWh-verbruik automatisch in.</li>
+          <li><strong>Remote starten en stoppen:</strong> een laadsessie starten of stoppen op afstand, zonder fysiek bij de paal te zijn.</li>
+          <li><strong>Online/offline status:</strong> je ziet direct in je dashboard of je paal verbonden is.</li>
+        </ul>
+        <p>Koppelen doe je via <strong>Profiel → Mijn laadpalen → Slimme paal koppelen</strong> in de app. De wizard legt stap voor stap uit hoe je de Pluggo-URL in de instellingen van jouw paal invoert. Bij de meeste merken duurt het minder dan vijf minuten. Hulp nodig? Mail <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a>.</p>
+      </details>
+
+      <details>
+        <summary>Kan ik een boeking verlengen als ik nog niet klaar ben met laden?</summary>
+        <p>Ja — via de push-notificatie die je ontvangt kort voor het einde van je tijdslot kun je direct een verlenging aanvragen. Als het tijdslot nog vrij is, wordt de boeking automatisch verlengd en betaal je het extra verbruik gewoon mee aan het einde van de sessie.</p>
       </details>
 
       <details>
@@ -1618,6 +1691,10 @@
       <span>Pluggo</span>
     </div>
     <div class="links">
+      <a href="./goedkoop-laden.html">Goedkoop laden</a>
+      <a href="./laadpaal-verhuren.html">Laadpaal verhuren</a>
+      <a href="./zonnepanelen-verdienen.html">Zonnepanelen verdienen</a>
+      <a href="./welke-laadpaal-werkt.html">Welke laadpaal werkt</a>
       <a href="./privacy.html">Privacybeleid</a>
       <a href="./terms.html">Algemene voorwaarden</a>
       <a href="mailto:info@pluggoapp.nl">Contact</a>
