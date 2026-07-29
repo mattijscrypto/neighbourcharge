@@ -229,6 +229,55 @@ serve(async (req) => {
     }
 
     // -----------------------------------------------------------------------
+    // 3c. DAC7 payouts-block guard (task #263)
+    //
+    // Zodra een paaleigenaar in een kalenderjaar de DAC7-rapportagedrempel
+    // (≥30 transacties OF ≥€2.000) heeft overschreden ZONDER zijn BSN/RSIN
+    // te hebben aangeleverd, wordt `dac7_reporting_state.payouts_blocked_at`
+    // gezet door de nightly cron / on-write trigger uit migratie 0032.
+    //
+    // We blokkeren dan nieuwe checkouts totdat de eigenaar zijn TIN via de
+    // submit-tin edge function heeft aangeleverd (die clear't payouts_blocked_at).
+    //
+    // Waarom aan de checkout-kant blokkeren? Bij Stripe destination charges
+    // vloeien de funds direct naar de connected account — als de betaling
+    // eenmaal geslaagd is, kunnen we het owner-aandeel niet meer 'vasthouden'.
+    // Blokkeren bij checkout-start is de enige plek waar we controle hebben.
+    //
+    // Jaargrens: we vragen expliciet Europa/Amsterdam-jaar op zodat de flag
+    // consistent is met de trigger die op payment_requested_at rekent (=
+    // fiscaal moment art. 35e Wet OB).
+    // -----------------------------------------------------------------------
+    {
+      const nlYear = Number(
+        new Intl.DateTimeFormat("nl-NL", {
+          timeZone: "Europe/Amsterdam",
+          year: "numeric",
+        }).format(new Date()),
+      );
+      if (Number.isFinite(nlYear)) {
+        const { data: dacState, error: dacErr } = await admin
+          .from("dac7_reporting_state")
+          .select("payouts_blocked_at")
+          .eq("owner_id", ownerId)
+          .eq("reporting_year", nlYear)
+          .maybeSingle();
+
+        if (dacErr) {
+          console.error(
+            "DAC7-status ophalen faalde, checkout wordt uit voorzichtigheid toegelaten:",
+            dacErr,
+          );
+        } else if (dacState?.payouts_blocked_at) {
+          return jsonError(
+            "De eigenaar van deze paal moet eerst een verplicht belastingnummer (BSN/RSIN) aanleveren voordat nieuwe boekingen betaald kunnen worden. Kies een andere paal of probeer het later opnieuw.",
+            409,
+          );
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // 4. Bereken bedragen — zelfde logica als create-payment-opp / PaymentIntent
     //
     // De boeking kan al gelocked bedragen hebben uit een eerdere betaalpoging.

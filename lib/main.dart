@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -13,9 +15,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'host_dashboard.dart';
 import 'live_charging_widget.dart';
 import 'push.dart';
 import 'push_actions.dart';
@@ -124,6 +128,51 @@ bool get bookingsAreLive {
   }
   if (_dbBypassEmailMatched) return true;
   return !DateTime.now().isBefore(bookingsGoLiveAt);
+}
+
+// ============================================================================
+// PluggoPrefs — lichtgewicht wrapper rond SharedPreferences voor "heeft user
+// deze onboarding/tutorial ooit gezien"-vlaggen (#316, #317).
+//
+// DESIGN: Bewust géén server-sync. Als je Pluggo op een nieuw device
+// installeert wil je juist een herhaling van de smart-paal-uitleg — een
+// gebruiker die maanden geleden op z'n oude iPhone de flow zag heeft de
+// uitleg allang vergeten. Lokale first-launch-flag is dus de juiste UX.
+// ============================================================================
+class PluggoPrefs {
+  static const _kSmartTutorialSeen = 'pluggo.tutorial.smart_booking_seen_v1';
+  static const _kWelcomeOnboardingSeen = 'pluggo.onboarding.welcome_seen_v1';
+
+  // Async guards: we cachen de SharedPreferences instance one-shot in main()
+  // (of lazy on first read) zodat opvolgende reads geen await hoeven te doen.
+  static SharedPreferences? _cachedPrefs;
+  static Future<SharedPreferences> _prefs() async {
+    _cachedPrefs ??= await SharedPreferences.getInstance();
+    return _cachedPrefs!;
+  }
+
+  // #316: Eerste smart-paal booking-tutorial (3 slides: aankomen, stekker,
+  // druk Start in app). Wordt getriggerd na _BookingSuccessDialog.
+  static Future<bool> smartTutorialSeen() async {
+    final p = await _prefs();
+    return p.getBool(_kSmartTutorialSeen) ?? false;
+  }
+
+  static Future<void> markSmartTutorialSeen() async {
+    final p = await _prefs();
+    await p.setBool(_kSmartTutorialSeen, true);
+  }
+
+  // #317: Eerste-app-open welkom-onboarding (2-3 slides voordat AuthGate opent)
+  static Future<bool> welcomeOnboardingSeen() async {
+    final p = await _prefs();
+    return p.getBool(_kWelcomeOnboardingSeen) ?? false;
+  }
+
+  static Future<void> markWelcomeOnboardingSeen() async {
+    final p = await _prefs();
+    await p.setBool(_kWelcomeOnboardingSeen, true);
+  }
 }
 // Hoeveel hele dagen tot de launch, in datums (dus niet uren). Op 6 juli
 // staat er "over 1 dag" en op 7 juli "vandaag!", ook al is het 23:59.
@@ -407,6 +456,286 @@ class AppColors {
   static const pioneer = Color(0xFFD4A437);     // Klassiek goud
   static const pioneerDark = Color(0xFF8C6A1A); // Voor tekst/icon-contrast
   static const pioneerSoft = Color(0xFFFDF6E0); // Achtergrond voor badge-pill
+}
+
+// ============================================
+// Custom map-marker bitmaps
+// --------------------------------------------
+// We tekenen alle map-markers zelf i.p.v. Google's stock
+// BitmapDescriptor.defaultMarkerWithHue() te gebruiken. Redenen:
+//
+//   1. `hueYellow` rendert bleek/grasgroen tegen de meeste kaart-
+//      achtergronden — onbruikbaar voor "solar" leesbaarheid.
+//   2. We willen VIER onderscheidbare states op de kaart:
+//        • Solar (groene ring + kleine amber zon-badge rechts-boven)
+//        • Smart / OCPP-gekoppeld (Pluggo-groen + wit bliksem-icoon ⚡)
+//        • Manueel (outlined Pluggo-groene ring, geen badge)
+//        • Solar + Smart combi (groene gevulde cirkel + bliksem + zon-badge)
+//
+//      Google's default markers geven ons niet meer dan een hue-parameter,
+//      dus dit MOET wel zelf getekend worden.
+//
+// Alle builders retourneren een `Future<BitmapDescriptor>` en cachen
+// zichzelf in `_HomeScreenState._loadCustomMarkers` (parallel gebouwd, één
+// keer per app-start). Tijdens de eerste ~50ms fallen we terug op de
+// stock hue-marker zodat er nooit een gat op de kaart valt.
+//
+// Gedeelde design-parameters — als je hier iets tweakt, ziet de hele
+// marker-familie er automatisch consistent uit.
+// ============================================
+const double _kMarkerSize = 96;
+const double _kMarkerOutlinePx = 3;
+const double _kSmartBadgeSize = 36; // badge-diameter voor ronde markers (legacy)
+const double _kPinBadgeR = 13.0;    // straal van badge op pin-markers
+
+/// Bouwt een Google Maps-stijl pin-path voor een [width]×[height] canvas.
+///
+/// De kop is een ruime cirkel bovenaan; twee vloeiende bezier-curves lopen
+/// naar de scherpe punt onderin. Alle markers delen dit pad.
+Path _buildPinPath(double width, double height) {
+  final double cx     = width / 2;
+  final double headR  = width * 0.31;           // ~30 px bij width=96
+  final double headCy = headR + 4;              // ~34 px — middelpunt kop
+  final double tipY   = height - 4;             // punt
+
+  final path = Path();
+  path.moveTo(cx, tipY);
+  path.cubicTo(
+    cx - headR * 0.25, tipY,
+    cx - headR,        headCy + headR * 1.05,
+    cx - headR,        headCy,
+  );
+  path.arcTo(
+    Rect.fromCircle(center: Offset(cx, headCy), radius: headR),
+    math.pi,   // start links
+    math.pi,   // sweep met klok mee → boven → rechts
+    false,
+  );
+  path.cubicTo(
+    cx + headR,        headCy + headR * 1.05,
+    cx + headR * 0.25, tipY,
+    cx,                tipY,
+  );
+  path.close();
+  return path;
+}
+
+/// Tekent een losstaand zonnetje (geen badge — grote standalone zon)
+/// voor boven de solar-pin. [radius] = straal van de kern.
+void _drawSunIcon(Canvas canvas, Offset center, double radius) {
+  // Acht stralen vóór de kern (zodat kern erop ligt)
+  final rayPaint = Paint()
+    ..color = AppColors.solar
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.8
+    ..strokeCap = StrokeCap.round;
+  final double rayInner = radius + 3;
+  final double rayOuter = radius + 3 + radius * 0.65;
+  for (int i = 0; i < 8; i++) {
+    final angle = i * math.pi / 4;
+    canvas.drawLine(
+      Offset(center.dx + math.cos(angle) * rayInner,
+             center.dy + math.sin(angle) * rayInner),
+      Offset(center.dx + math.cos(angle) * rayOuter,
+             center.dy + math.sin(angle) * rayOuter),
+      rayPaint,
+    );
+  }
+  // Gevulde kern
+  canvas.drawCircle(center, radius, Paint()..color = AppColors.solar);
+  // Witte rand voor contrast met groene pin erachter
+  canvas.drawCircle(
+    center, radius,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0,
+  );
+}
+
+/// Solar-paal marker: groene pin met een duidelijke amber zon erboven.
+///
+/// De zon zweeft boven de pinkop op een verlengd canvas (120px hoog).
+/// [withSmartBadge] voegt een ⚡ toe in de pinkop voor OCPP+solar.
+Future<BitmapDescriptor> buildSolarMarkerBitmap({
+  bool withSmartBadge = false,
+}) async {
+  const double w       = _kMarkerSize;       // 96
+  const double h       = _kMarkerSize + 28;  // 124 — extra ruimte voor zon
+  const double pinTopY = 28.0;               // pin begint hier (zon erboven)
+  const double sunR    = 11.0;               // straal zonkern
+  const double sunCy   = 13.0;              // centrum zon (Y)
+  final double cx      = w / 2;
+
+  final recorder = ui.PictureRecorder();
+  final canvas   = Canvas(recorder);
+
+  // 1) Zon boven de pin
+  _drawSunIcon(canvas, Offset(cx, sunCy), sunR);
+
+  // 2) Groene pin (verschoven naar beneden zodat zon er boven past)
+  canvas.save();
+  canvas.translate(0, pinTopY);
+  final path = _buildPinPath(w, _kMarkerSize);  // pin in 96×96 space, verschoven
+
+  canvas.drawPath(path, Paint()..color = AppColors.primary);
+  canvas.drawPath(
+    path,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _kMarkerOutlinePx
+      ..strokeJoin = StrokeJoin.round,
+  );
+
+  // 3) Optioneel bliksem in kop voor OCPP
+  if (withSmartBadge) {
+    final double headR  = w * 0.31;
+    final double headCy = headR + 4;
+    _drawLightningBolt(
+      canvas, Offset(cx, headCy), height: headR * 1.0, color: Colors.white,
+    );
+  }
+  canvas.restore();
+
+  final picture = recorder.endRecording();
+  final image   = await picture.toImage(w.toInt(), h.toInt());
+  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+  return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+}
+
+/// Smart-paal marker: gevulde Pluggo-groene pin met wit ⚡ in de kop.
+/// Voor palen met `ocppChargerId != null` die géén solar zijn.
+Future<BitmapDescriptor> buildSmartMarkerBitmap() async {
+  final double cx     = _kMarkerSize / 2;
+  final double headR  = _kMarkerSize * 0.31;
+  final double headCy = headR + 4;
+
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final path = _buildPinPath(_kMarkerSize, _kMarkerSize);
+
+  canvas.drawPath(path, Paint()..color = AppColors.primary);
+  canvas.drawPath(
+    path,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _kMarkerOutlinePx
+      ..strokeJoin = StrokeJoin.round,
+  );
+  _drawLightningBolt(
+    canvas, Offset(cx, headCy), height: headR * 1.0, color: Colors.white,
+  );
+
+  final picture = recorder.endRecording();
+  final image =
+      await picture.toImage(_kMarkerSize.toInt(), _kMarkerSize.toInt());
+  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+  return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+}
+
+/// Manueel-paal marker: gevulde Pluggo-groene pin, geen icoon.
+/// Signaleert "boeken kan, maar aan/uit doe je fysiek bij de paal".
+Future<BitmapDescriptor> buildManualMarkerBitmap() async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final path = _buildPinPath(_kMarkerSize, _kMarkerSize);
+
+  canvas.drawPath(path, Paint()..color = AppColors.primary);
+  canvas.drawPath(
+    path,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _kMarkerOutlinePx
+      ..strokeJoin = StrokeJoin.round,
+  );
+
+  final picture = recorder.endRecording();
+  final image =
+      await picture.toImage(_kMarkerSize.toInt(), _kMarkerSize.toInt());
+  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+  return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+}
+
+/// Tekent een klein bliksem-badge (Pluggo-groene cirkel + wit bliksem-icoon)
+/// op een gegeven [center] met [radius]. Gebruikt voor de solar+smart combo.
+void _drawSmartBadge(Canvas canvas, Offset center, double radius) {
+  // Achtergrond
+  canvas.drawCircle(center, radius, Paint()..color = AppColors.primary);
+  // Witte rand
+  canvas.drawCircle(
+    center,
+    radius,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5,
+  );
+  // Bliksem in het midden
+  _drawLightningBolt(canvas, center, height: radius * 1.15, color: Colors.white);
+}
+
+/// Tekent een kleine zon-badge (amber cirkel + wit zonnetje) op het canvas.
+/// Gebruikt als badge rechts-boven de groene marker voor solar-palen.
+void _drawSunBadge(Canvas canvas, Offset center, double radius) {
+  // Amber achtergrond
+  canvas.drawCircle(center, radius, Paint()..color = AppColors.solar);
+  // Witte rand
+  canvas.drawCircle(
+    center,
+    radius,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5,
+  );
+  // Klein zonnetje: witte kern + 8 korte stralen
+  final double sunR = radius * 0.32;
+  canvas.drawCircle(center, sunR, Paint()..color = Colors.white);
+  final rayPaint = Paint()
+    ..color = Colors.white
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.8
+    ..strokeCap = StrokeCap.round;
+  final double rayInner = sunR + 2;
+  final double rayOuter = sunR + radius * 0.32;
+  for (int i = 0; i < 8; i++) {
+    final angle = i * math.pi / 4;
+    final dx = math.cos(angle);
+    final dy = math.sin(angle);
+    canvas.drawLine(
+      Offset(center.dx + dx * rayInner, center.dy + dy * rayInner),
+      Offset(center.dx + dx * rayOuter, center.dy + dy * rayOuter),
+      rayPaint,
+    );
+  }
+}
+
+/// Tekent een gestileerde bliksem-schicht rond [center] met een verticale
+/// [height]. De vorm is een 6-punts polygoon (klassiek "lightning bolt"),
+/// gecentreerd en met de gegeven [color] gevuld.
+void _drawLightningBolt(
+  Canvas canvas,
+  Offset center, {
+  required double height,
+  required Color color,
+}) {
+  // Normalized coordinates voor de bolt-vorm: (-x links, +x rechts;
+  // -y boven, +y onder). Klassiek zigzag: top-right → mid-in → mid-out →
+  // bottom-left → mid-in → mid-out → sluit.
+  final double h = height / 2;
+  final double w = height * 0.35;
+  final path = Path()
+    ..moveTo(center.dx + w * 0.25, center.dy - h)
+    ..lineTo(center.dx - w, center.dy + h * 0.05)
+    ..lineTo(center.dx - w * 0.15, center.dy + h * 0.05)
+    ..lineTo(center.dx - w * 0.4, center.dy + h)
+    ..lineTo(center.dx + w, center.dy - h * 0.1)
+    ..lineTo(center.dx + w * 0.1, center.dy - h * 0.1)
+    ..close();
+  canvas.drawPath(path, Paint()..color = color);
 }
 
 // ============================================
@@ -1166,6 +1495,11 @@ class Charger {
   // #293 en de remote-start-session / remote-stop-session edge functions.
   final String? ocppChargerId;
 
+  // MID-meter aanwezig: door eigenaar bevestigd in de koppelwizard (task #372).
+  // True → ERE-tegel toont echte kWh + schatting €. False → slot-icoontje.
+  // Zie migratie 0041 en task #338a.
+  final bool hasMidMeter;
+
   const Charger({
     required this.id,
     required this.name,
@@ -1186,6 +1520,7 @@ class Charger {
     this.isExactLocation = false,
     this.maxPowerKw,
     this.ocppChargerId,
+    this.hasMidMeter = false,
   });
 
   // Van een database-rij (Map) naar een Charger-object.
@@ -1244,6 +1579,7 @@ class Charger {
       // grants); publieke chargers_public view geeft dit nooit terug. Als
       // key ontbreekt of expliciet null is → paal is niet aan CSMS gekoppeld.
       ocppChargerId: map['ocpp_charger_id'] as String?,
+      hasMidMeter: map['has_mid_meter'] as bool? ?? false,
     );
   }
 }
@@ -1387,6 +1723,10 @@ class Booking {
   // Zie migratie 0023.
   final int? startSocPct;
   final int targetSocPct;
+  // Host markeerde de boeking als "geen lading gehad" (no-show of geen stekker).
+  // Zie migratie 0040 + task #371. Onderdrukt de Vul kWh in-prompt en het
+  // betaalverzoek. Default false — bestaande boekingen blijven onaangeraakt.
+  final bool noCharge;
   // Optioneel: charger-info uit een joined query
   final Charger? charger;
 
@@ -1407,6 +1747,7 @@ class Booking {
     this.paymentRequestedAt,
     this.startSocPct,
     this.targetSocPct = 80,
+    this.noCharge = false,
     this.charger,
   });
 
@@ -1453,6 +1794,10 @@ class Booking {
       // Default 80 als kolom om wat voor reden dan ook null zou zijn
       // (bestaat niet in de rij, oude data van vóór migratie 0023, etc.)
       targetSocPct: (map['target_soc_pct'] as num?)?.toInt() ?? 80,
+      // no_charge komt uit migratie 0040 en heeft daar default false — de
+      // ?? false-fallback is voor pre-migratie rijen of joined selects die
+      // de kolom niet meenemen.
+      noCharge: (map['no_charge'] as bool?) ?? false,
       charger: charger,
     );
   }
@@ -1464,12 +1809,13 @@ class Booking {
 
   /// True als de owner kWh moet invullen voor deze boeking.
   /// Voorwaarden: confirmed, eindtijd voorbij, kwh nog niet ingevuld,
-  /// nog niet al betaald.
+  /// nog niet al betaald, en (task #371) niet als "geen lading" gemarkeerd.
   bool get awaitingKwhInput =>
       status == 'confirmed' &&
       isFinished &&
       kwhConsumed == null &&
-      paymentStatus != 'paid';
+      paymentStatus != 'paid' &&
+      !noCharge;
 
   /// True als de owner kWh heeft ingevuld én de boeker nog moet betalen.
   /// Toont in de UI de "Betalen"-knop met het exacte bedrag.
@@ -1763,9 +2109,261 @@ class NeighbourChargeApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const AuthGate(),
+      home: const _WelcomeOnboardingGate(child: AuthGate()),
     );
   }
+}
+
+// ============================================================================
+// _WelcomeOnboardingGate — task #317
+//
+// Wrapper vóór AuthGate die bij eerste app-open eenmalig de welkom-slides
+// toont (WelcomeOnboardingScreen). Zodra 'seen' is gemarkeerd valt de gate
+// door naar [child] (in productie: AuthGate → LoginScreen / HomeScreen).
+//
+// Waarom dit hier en niet op LoginScreen? Onboarding moet los staan van
+// auth-state — óók een unauthenticated gast die de app voor het eerst
+// opent krijgt eerst een kort verhaal ("wat is Pluggo?", "wat is een
+// smart paal?"). Als 'ie inlogt en opnieuw opent, is de flag al true
+// en gaat 'ie meteen door naar de map.
+// ============================================================================
+class _WelcomeOnboardingGate extends StatefulWidget {
+  const _WelcomeOnboardingGate({Key? key, required this.child})
+      : super(key: key);
+
+  final Widget child;
+
+  @override
+  State<_WelcomeOnboardingGate> createState() => _WelcomeOnboardingGateState();
+}
+
+class _WelcomeOnboardingGateState extends State<_WelcomeOnboardingGate> {
+  bool? _seen; // null = laden, true = door naar child, false = toon onboarding
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final seen = await PluggoPrefs.welcomeOnboardingSeen();
+    if (!mounted) return;
+    setState(() => _seen = seen);
+  }
+
+  Future<void> _handleDone() async {
+    await PluggoPrefs.markWelcomeOnboardingSeen();
+    if (!mounted) return;
+    setState(() => _seen = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_seen == null) {
+      // Korte splash-achtige loader — vermijdt flash-of-onboarding als de
+      // async read snel klaar is. Groene achtergrond matcht native splash.
+      return const Scaffold(
+        backgroundColor: AppColors.primary,
+        body: SizedBox.shrink(),
+      );
+    }
+    if (_seen == false) {
+      return WelcomeOnboardingScreen(onDone: _handleDone);
+    }
+    return widget.child;
+  }
+}
+
+// ============================================================================
+// WelcomeOnboardingScreen — task #317
+//
+// PageView met 2 slides voor first-launch:
+//   1. Welkom bij Pluggo — deel of gebruik laadpalen bij mensen thuis
+//   2. Smart of Handmatig — leg het onderscheid uit dat de kaart ook toont
+//
+// Bewust kort gehouden (2 slides) zodat we snel bij de auth flow zijn.
+// Skip is altijd zichtbaar behalve op de laatste slide (waar "Aan de slag"
+// het overneemt). Volgende / Vorige via PageView-swipe én dots-indicator.
+// ============================================================================
+class WelcomeOnboardingScreen extends StatefulWidget {
+  const WelcomeOnboardingScreen({Key? key, required this.onDone})
+      : super(key: key);
+
+  final Future<void> Function() onDone;
+
+  @override
+  State<WelcomeOnboardingScreen> createState() =>
+      _WelcomeOnboardingScreenState();
+}
+
+class _WelcomeOnboardingScreenState extends State<WelcomeOnboardingScreen> {
+  final PageController _pc = PageController();
+  int _idx = 0;
+
+  static const _slides = [
+    _OnboardingSlide(
+      icon: Icons.ev_station_rounded,
+      title: 'Welkom bij Pluggo',
+      body:
+          'Deel je eigen laadpaal met de buurt, óf vind een paal bij iemand thuis in de buurt. Goedkoper en persoonlijker dan de commerciële paal om de hoek.',
+    ),
+    _OnboardingSlide(
+      icon: Icons.bolt_rounded,
+      title: 'Smart of handmatig',
+      body:
+          'Sommige palen zijn slim (⚡ Start in app): start en stop je direct vanuit Pluggo. Andere zijn handmatig (🔌): de eigenaar zet \'m voor je aan. De kaart laat het duidelijk zien.',
+    ),
+  ];
+
+  @override
+  void dispose() {
+    _pc.dispose();
+    super.dispose();
+  }
+
+  Future<void> _next() async {
+    if (_idx == _slides.length - 1) {
+      await widget.onDone();
+      return;
+    }
+    _pc.nextPage(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  Future<void> _skip() async {
+    await widget.onDone();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final last = _idx == _slides.length - 1;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top-row: Overslaan rechts (verborgen op laatste slide).
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 12, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (!last)
+                    TextButton(
+                      onPressed: _skip,
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.textSecondary,
+                      ),
+                      child: const Text('Overslaan'),
+                    )
+                  else
+                    const SizedBox(height: 36),
+                ],
+              ),
+            ),
+            Expanded(
+              child: PageView.builder(
+                controller: _pc,
+                itemCount: _slides.length,
+                onPageChanged: (i) => setState(() => _idx = i),
+                itemBuilder: (context, i) {
+                  final s = _slides[i];
+                  return Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 128,
+                          height: 128,
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            s.icon,
+                            size: 64,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+                        Text(
+                          s.title,
+                          style: GoogleFonts.inter(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          s.body,
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            color: AppColors.textSecondary,
+                            height: 1.55,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            // Page-indicator dots.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(_slides.length, (i) {
+                final active = i == _idx;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  height: 8,
+                  width: active ? 28 : 8,
+                  decoration: BoxDecoration(
+                    color: active
+                        ? AppColors.primary
+                        : AppColors.primary.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 20),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _next,
+                  child: Text(last ? 'Aan de slag' : 'Volgende'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Value-object voor één welkom-slide.
+class _OnboardingSlide {
+  final IconData icon;
+  final String title;
+  final String body;
+
+  const _OnboardingSlide({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
 }
 
 // ============================================
@@ -1783,6 +2381,10 @@ class _AuthGateState extends State<AuthGate> {
   // hebben gedaan, zodat we het maar één keer per sessie aanroepen.
   String? _pushRegisteredForUserId;
 
+  // Deep-link handling (#245): pluggo://auth/callback voor e-mail bevestiging.
+  final _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSub;
+
   void _maybePushRegister() {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -1795,11 +2397,37 @@ class _AuthGateState extends State<AuthGate> {
     PluggoPush.instance.maybeRegisterAfterLogin();
   }
 
+  // Verwerk een binnenkomende deep-link URI van het pluggo://-scheme.
+  // Auth-links (e-mailbevestiging, magic link) worden doorgestuurd naar
+  // Supabase zodat de sessie automatisch wordt opgestart.
+  Future<void> _handleUri(Uri uri) async {
+    if (uri.scheme != 'pluggo') return;
+    if (uri.host == 'auth' || uri.host == 'auth-callback') {
+      try {
+        await supabase.auth.getSessionFromUrl(uri);
+      } catch (_) {
+        // Silently ignore — url kan verlopen zijn of al verwerkt.
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     // Bij cold start met bestaande sessie ook proberen.
     _maybePushRegister();
+    // Deep-link: verwerk de link waarmee de app geopend is (cold start).
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) _handleUri(uri);
+    });
+    // Deep-link: luister naar links terwijl de app al draait (warm start).
+    _linkSub = _appLinks.uriLinkStream.listen(_handleUri);
+  }
+
+  @override
+  void dispose() {
+    _linkSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -1858,6 +2486,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _filterAvailable = false;
   bool _filterSolar = false;
   bool _filterNearby = false;
+  // #10: Prijsfilter — null = geen filter, anders max. prijs per kWh in €.
+  double? _maxPriceFilter;
+  // Tri-state chip: 'all' (default), 'smart' (⚡ Start in app),
+  // 'manual' (🔌 Handmatig). Smart en manueel zijn mutually exclusive —
+  // twee chips gaan aan/uit in dezelfde groep zodat de user niet per
+  // ongeluk een lege doorsnede krijgt. Zie task #309.
+  String _controlFilter = 'all';
 
   // Laatste bekende positie van de gebruiker — nodig voor de "Dichtbij"-filter.
   // Wordt ingevuld zodra we succesvol Geolocator.getCurrentPosition hebben gedaan.
@@ -1880,6 +2515,12 @@ class _HomeScreenState extends State<HomeScreen> {
   int _kwhNeededOwner = 0;
   int _payNeededBooker = 0;
 
+  // Sticky Booker/Host-tabs (task #346). Bepalen welke inhoud we onder de
+  // header renderen: 0 = Boeken (kaart + palenlijst), 1 = Mijn paal (host-
+  // dashboard met eigen-laadsessies + verhuur-overzicht). De pill zit altijd
+  // zichtbaar in de SafeArea zodat een host altijd terug kan naar Boeken.
+  int _tabIndex = 0;
+
   // Wordt true zodra de user permissie heeft gegeven; dan tonen we de blauwe dot
   bool _showMyLocation = false;
   // Voorkomt dat we meerdere keren tegelijk locatie proberen op te halen
@@ -1897,6 +2538,21 @@ class _HomeScreenState extends State<HomeScreen> {
   // na drag-end naar een andere positie dan waar hij normaal snapt.
   static const List<double> _sheetSnaps = [0.18, 0.32, 0.85];
 
+  // Custom marker-bitmaps. Worden één keer parallel gebouwd in initState en
+  // daarna hergebruikt voor elke marker-render. Null zolang de bouw nog
+  // loopt — _visibleMarkers valt dan terug op stock defaultMarkerWithHue
+  // zodat er nooit een "gat" op de kaart valt.
+  //
+  // Vier varianten (zie buildSolarMarkerBitmap / Smart / Manual hierboven):
+  //   • _solarMarker       — amber cirkel + zonnetje (alleen solar)
+  //   • _solarSmartMarker  — bovenstaande + kleine ⚡-badge (solar + OCPP)
+  //   • _smartMarker       — Pluggo-groen + bliksem (OCPP, niet-solar)
+  //   • _manualMarker      — outlined Pluggo-groene ring (geen OCPP, niet-solar)
+  BitmapDescriptor? _solarMarker;
+  BitmapDescriptor? _solarSmartMarker;
+  BitmapDescriptor? _smartMarker;
+  BitmapDescriptor? _manualMarker;
+
   @override
   void initState() {
     super.initState();
@@ -1906,9 +2562,31 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUnreadMessages();
     _loadKwhNeededOwner();
     _loadPayNeededBooker();
+    _loadCustomMarkers();
     // Bij elke toetsaanslag direct filteren (MVP-schaal is dit prima)
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text);
+    });
+  }
+
+  // Bouwt custom marker-bitmaps op de UI-thread (canvas-render is snel en
+  // gebeurt maar één keer per app-start). Vier varianten worden parallel
+  // gebouwd via Future.wait — samen typisch < 50ms op recente devices.
+  // Zet de resulterende descriptors in state zodat _visibleMarkers ze bij
+  // de volgende build oppikt.
+  Future<void> _loadCustomMarkers() async {
+    final results = await Future.wait([
+      buildSolarMarkerBitmap(),
+      buildSolarMarkerBitmap(withSmartBadge: true),
+      buildSmartMarkerBitmap(),
+      buildManualMarkerBitmap(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _solarMarker = results[0];
+      _solarSmartMarker = results[1];
+      _smartMarker = results[2];
+      _manualMarker = results[3];
     });
   }
 
@@ -1967,6 +2645,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (_filterAvailable && !c.available) return false;
       // Chip: alleen zonne-energie
       if (_filterSolar && !c.solar) return false;
+      // Chip-group: smart (⚡) vs handmatig (🔌) — mutually exclusive.
+      // 'all' laat beide door.
+      if (_controlFilter == 'smart' && c.ocppChargerId == null) return false;
+      if (_controlFilter == 'manual' && c.ocppChargerId != null) return false;
       // Chip: alleen palen binnen straal van mijn locatie
       if (_filterNearby && me != null) {
         final meters = Geolocator.distanceBetween(
@@ -1976,6 +2658,11 @@ class _HomeScreenState extends State<HomeScreen> {
           c.position.longitude,
         );
         if (meters > _nearbyRadiusKm * 1000) return false;
+      }
+      // #10: Prijsfilter — filter palen boven het gekozen maximum per kWh.
+      if (_maxPriceFilter != null &&
+          parseChargerPrice(c.price) > _maxPriceFilter!) {
+        return false;
       }
       return true;
     }).toList();
@@ -1987,25 +2674,51 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_filterAvailable) n++;
     if (_filterSolar) n++;
     if (_filterNearby) n++;
+    if (_controlFilter != 'all') n++;
+    if (_maxPriceFilter != null) n++;
     return n;
   }
 
   // Markers worden live herberekend uit de zichtbare palen, zodat het
   // kaart-beeld meeloopt met de zoekbalk.
+  //
+  // De marker-icoon wordt bepaald door twee onafhankelijke assen:
+  //   • available        — rood als niet beschikbaar (voor beide types)
+  //   • solar × ocpp     — vier combinaties, elk met een eigen custom bitmap
+  //
+  // Truth table:
+  //   solar   ocpp     → marker
+  //   false   false    → _manualMarker    (outlined groene ring)
+  //   false   true     → _smartMarker     (groene cirkel + ⚡)
+  //   true    false    → _solarMarker     (amber cirkel + zonnetje)
+  //   true    true     → _solarSmartMarker (amber cirkel + zonnetje + ⚡-badge)
+  //
+  // Zolang de custom bitmaps nog geladen worden (allemaal null in de eerste
+  // ~50ms na app-start) vallen we per case terug op de dichtstbijzijnde
+  // stock defaultMarkerWithHue — nooit een gat op de kaart.
+  //
+  // Zie task #308 voor design-rationale (smart vs manueel visualiseren).
   Set<Marker> get _visibleMarkers {
     return _visibleChargers.map((charger) {
-      double hue;
+      final BitmapDescriptor icon;
       if (!charger.available) {
-        hue = BitmapDescriptor.hueRed;
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+      } else if (charger.solar && charger.ocppChargerId != null) {
+        icon = _solarSmartMarker ??
+            _solarMarker ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow);
       } else if (charger.solar) {
-        hue = BitmapDescriptor.hueYellow;
+        icon = _solarMarker ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow);
+      } else if (charger.ocppChargerId != null) {
+        icon = _smartMarker ?? BitmapDescriptor.defaultMarkerWithHue(160);
       } else {
-        hue = 160;
+        icon = _manualMarker ?? BitmapDescriptor.defaultMarkerWithHue(160);
       }
       return Marker(
         markerId: MarkerId(charger.id),
         position: charger.position,
-        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+        icon: icon,
         infoWindow: InfoWindow(
           title: charger.name,
           // Booker-facing: paalprijs + €0,03 servicefee = wat de booker betaalt.
@@ -2394,6 +3107,12 @@ class _HomeScreenState extends State<HomeScreen> {
       // Pionier-vlag op de Charger-objecten zetten (we maken nieuwe instances
       // omdat Charger immutable is). We behouden bewust isExactLocation: false
       // — deze lijst komt uit de publieke map en blijft fuzzy.
+      //
+      // LET OP: alle nieuwe optional fields op Charger moeten hier expliciet
+      // meegegeven worden — bij deze reconstructie gaan defaults anders
+      // stilletjes terug naar null. `maxPowerKw` en `ocppChargerId` bepalen
+      // downstream welke UI-branches actief zijn (smart-marker, OCPP-knoppen
+      // op booking-detail, ETA-berekening in LiveChargingCard).
       chargers = chargers
           .map((c) => Charger(
                 id: c.id,
@@ -2412,6 +3131,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 cableIncluded: c.cableIncluded,
                 accessType: c.accessType,
                 isExactLocation: false,
+                maxPowerKw: c.maxPowerKw,
+                ocppChargerId: c.ocppChargerId,
                 ownerIsPioneer:
                     c.ownerId != null && pioneerIds.contains(c.ownerId),
               ))
@@ -2465,6 +3186,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openDetail(Charger charger) async {
+    // #11: animeer de kaart naar de geselecteerde paal voordat we de
+    // detail-pagina openen, zodat de gebruiker de context ziet.
+    unawaited(mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: charger.position, zoom: 15),
+      ),
+    ));
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -3306,30 +4034,70 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Host-tab: het dashboard-scroll-view moet niet onder de sticky header
+    // vallen. We reserveren ruimte voor SafeArea-top + logo-rij (48) +
+    // 12 spacing + tab-pill (44) + 12 spacing = ~116 boven MediaQuery.top.
+    final hostTopInset = MediaQuery.of(context).padding.top + 8 + 40 + 12 + 44 + 12;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       // Body gebruikt Stack zodat kaart full-screen is en overlays erboven liggen
       body: Stack(
         children: [
-          // === Kaart vult het volledige scherm ===
-          GoogleMap(
-            onMapCreated: (controller) => mapController = controller,
-            initialCameraPosition: const CameraPosition(
-              target: _center,
-              zoom: 13,
+          // === Onderlaag: booker-kaart OF host-dashboard, afhankelijk van tab ===
+          if (_tabIndex == 0)
+            GoogleMap(
+              onMapCreated: (controller) => mapController = controller,
+              initialCameraPosition: const CameraPosition(
+                target: _center,
+                zoom: 13,
+              ),
+              markers: _visibleMarkers,
+              // Blauwe dot wordt pas getoond nadat user op de locate-knop tikt
+              // en toestemming geeft. Voorkomt dat iOS de permission-popup
+              // meteen bij app-start laat zien.
+              myLocationEnabled: _showMyLocation,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              padding: const EdgeInsets.only(bottom: 240), // Ruimte voor bottom sheet
+            )
+          else
+            Positioned.fill(
+              child: HostDashboardBody(topInset: hostTopInset),
             ),
-            markers: _visibleMarkers,
-            // Blauwe dot wordt pas getoond nadat user op de locate-knop tikt
-            // en toestemming geeft. Voorkomt dat iOS de permission-popup
-            // meteen bij app-start laat zien.
-            myLocationEnabled: _showMyLocation,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-            padding: const EdgeInsets.only(bottom: 240), // Ruimte voor bottom sheet
-          ),
 
-          // === Floating header: logo + zoekbalk + user avatar ===
+          // === Sticky-header backdrop voor Host-tab ===
+          // Op de Booker-tab hoeft dit niet: de kaart is opaque en de zoekbalk
+          // heeft een eigen surface-kleur. Op de Host-tab scrollt de ListView
+          // onder de logo-rij + tab-pill door — zonder deze backdrop zie je
+          // sessie-items door de header heen bleeden. Een gradient zorgt voor
+          // een zachte fade in plaats van een harde snijlijn.
+          if (_tabIndex == 1)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: hostTopInset,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AppColors.background,
+                        AppColors.background,
+                        AppColors.background.withOpacity(0.0),
+                      ],
+                      stops: const [0.0, 0.85, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // === Floating header: logo + tab-pill + (booker: zoekbalk + chips) ===
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -3374,6 +4142,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  // Sticky Booker/Host tab-pill (task #346). Altijd zichtbaar
+                  // zodat een host met één tik terug kan naar Boeken.
+                  _bookerHostTabPill(),
+                  const SizedBox(height: 12),
+                  // Onderstaande zoekbalk + filter-chips zijn alléén relevant
+                  // in de Boeken-tab. In Verhuren-tab levert de host-dashboard
+                  // zelf zijn scrollbare inhoud onder de sticky header.
+                  if (_tabIndex == 0) ...[
                   // Zoekbalk met pil-vorm en zachte schaduw — filtert live
                   Container(
                     decoration: BoxDecoration(
@@ -3421,6 +4197,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 10),
                   // Horizontaal scrollende filter-chips — werken samen met
                   // de zoekbalk, dus je kunt typen + filters combineren.
+                  //
+                  // De ⚡ Start in app / 🔌 Handmatig chips zijn mutually
+                  // exclusive (via _controlFilter enum) zodat een user niet
+                  // per ongeluk een lege doorsnede krijgt door beide aan te
+                  // klikken. Zie task #309.
                   SizedBox(
                     height: 36,
                     child: ListView(
@@ -3433,6 +4214,26 @@ class _HomeScreenState extends State<HomeScreen> {
                           selected: _filterAvailable,
                           onTap: () => setState(
                               () => _filterAvailable = !_filterAvailable),
+                        ),
+                        const SizedBox(width: 8),
+                        _filterChip(
+                          label: 'Start in app',
+                          icon: Icons.bolt_rounded,
+                          selected: _controlFilter == 'smart',
+                          onTap: () => setState(() {
+                            _controlFilter =
+                                _controlFilter == 'smart' ? 'all' : 'smart';
+                          }),
+                        ),
+                        const SizedBox(width: 8),
+                        _filterChip(
+                          label: 'Handmatig',
+                          icon: Icons.power_rounded,
+                          selected: _controlFilter == 'manual',
+                          onTap: () => setState(() {
+                            _controlFilter =
+                                _controlFilter == 'manual' ? 'all' : 'manual';
+                          }),
                         ),
                         const SizedBox(width: 8),
                         _filterChip(
@@ -3449,6 +4250,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           selected: _filterNearby,
                           onTap: _toggleNearbyFilter,
                         ),
+                        const SizedBox(width: 8),
+                        // #10: Prijsfilter
+                        _filterChip(
+                          label: _maxPriceFilter != null
+                              ? 'Max €${_maxPriceFilter!.toStringAsFixed(2)}/kWh'
+                              : 'Max prijs',
+                          icon: Icons.euro_rounded,
+                          selected: _maxPriceFilter != null,
+                          onTap: () => _showPriceFilterSheet(context),
+                        ),
+                        const SizedBox(width: 8),
+                        // Info-chip → opent legende met marker-uitleg.
+                        // Bewust géén selected-state; het is een uitleg-knop.
+                        _filterChip(
+                          label: 'Wat betekenen de markers?',
+                          icon: Icons.help_outline_rounded,
+                          selected: false,
+                          onTap: () => _showMarkerLegend(context),
+                        ),
                         if (_activeFilterCount > 0) ...[
                           const SizedBox(width: 8),
                           _filterChip(
@@ -3459,18 +4279,22 @@ class _HomeScreenState extends State<HomeScreen> {
                               _filterAvailable = false;
                               _filterSolar = false;
                               _filterNearby = false;
+                              _controlFilter = 'all';
+                              _maxPriceFilter = null;
                             }),
                           ),
                         ],
                       ],
                     ),
                   ),
+                  ], // sluit `if (_tabIndex == 0) ...[` — booker-header items
                 ],
               ),
             ),
           ),
 
-          // === Sleepbare bottom sheet met lijst van laadpunten ===
+          // === Sleepbare bottom sheet met lijst van laadpunten (alleen in Boeken-tab) ===
+          if (_tabIndex == 0)
           DraggableScrollableSheet(
             controller: _sheetController,
             initialChildSize: 0.32,
@@ -3579,53 +4403,127 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      // === Floating actions: locate-me + toevoegen, beide boven de bottom sheet ===
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 80),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            // Kleine ronde locate-me knop
-            FloatingActionButton(
-              heroTag: 'locate-me',
-              onPressed: _locating ? null : _goToMyLocation,
-              backgroundColor: Colors.white,
-              foregroundColor: AppColors.primary,
-              elevation: 2,
-              mini: true,
-              shape: const CircleBorder(),
-              child: _locating
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: AppColors.primary,
+      // === Floating actions: locate-me + toevoegen, alleen in de Boeken-tab.
+      // In Verhuren-tab levert het host-dashboard zelf de start-eigen-laadsessie
+      // CTA — dubbele FAB's daar zouden alleen maar afleiden.
+      floatingActionButton: _tabIndex != 0
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 80),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Kleine ronde locate-me knop
+                  FloatingActionButton(
+                    heroTag: 'locate-me',
+                    onPressed: _locating ? null : _goToMyLocation,
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppColors.primary,
+                    elevation: 2,
+                    mini: true,
+                    shape: const CircleBorder(),
+                    child: _locating
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: AppColors.primary,
+                            ),
+                          )
+                        : const Icon(Icons.my_location_rounded, size: 22),
+                  ),
+                  const SizedBox(height: 10),
+                  // Grote uitgebreide "Toevoegen" knop
+                  FloatingActionButton.extended(
+                    heroTag: 'add-charger',
+                    onPressed: _openAdd,
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    icon: const Icon(Icons.add_rounded),
+                    label: Text(
+                      'Toevoegen',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600,
                       ),
-                    )
-                  : const Icon(Icons.my_location_rounded, size: 22),
-            ),
-            const SizedBox(height: 10),
-            // Grote uitgebreide "Toevoegen" knop
-            FloatingActionButton.extended(
-              heroTag: 'add-charger',
-              onPressed: _openAdd,
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              elevation: 2,
-              icon: const Icon(Icons.add_rounded),
-              label: Text(
-                'Toevoegen',
-                style: GoogleFonts.inter(
-                  fontWeight: FontWeight.w600,
-                ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+    );
+  }
+
+  // ==========================================================================
+  // Sticky Booker/Host tab-pill — zit altijd bovenaan onder de logo-rij.
+  // Twee segmenten met een gedeelde witte pill-container en één actieve segment
+  // dat de Pluggo-groen accent krijgt. Ontworpen om compact (44px hoog) te
+  // blijven zodat de rest van de header ruimte overhoudt voor zoekbalk + chips.
+  // Task #346.
+  // ==========================================================================
+  Widget _bookerHostTabPill() {
+    return Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: softShadow,
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(child: _tabSegment(index: 0, label: 'Boeken', icon: Icons.map_rounded)),
+          Expanded(child: _tabSegment(index: 1, label: 'Mijn paal', icon: Icons.ev_station_rounded)),
+        ],
+      ),
+    );
+  }
+
+  Widget _tabSegment({
+    required int index,
+    required String label,
+    required IconData icon,
+  }) {
+    final selected = _tabIndex == index;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () {
+          if (_tabIndex == index) return;
+          setState(() => _tabIndex = index);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? Colors.white : AppColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? Colors.white : AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -3748,6 +4646,313 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Toont een bottom sheet met uitleg van de vier marker-varianten op de
+  // #10: Prijsfilter bottom sheet — slider van €0,10 tot €0,60 per kWh.
+  // De waarde wordt opgeslagen in _maxPriceFilter (null = geen filter).
+  void _showPriceFilterSheet(BuildContext context) {
+    // Beginwaarde: huidig filter of een goed midden (€0,35).
+    double localValue = _maxPriceFilter ?? 0.35;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Maximum prijs per kWh',
+                style: GoogleFonts.inter(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Toon alleen palen tot €${localValue.toStringAsFixed(2)} per kWh',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              Slider(
+                value: localValue,
+                min: 0.10,
+                max: 0.60,
+                divisions: 10,
+                activeColor: AppColors.primary,
+                inactiveColor: AppColors.divider,
+                label: '€${localValue.toStringAsFixed(2)}',
+                onChanged: (v) => setLocal(() => localValue = v),
+              ),
+              Row(
+                children: [
+                  const Text('€0,10', style: TextStyle(fontSize: 12)),
+                  const Spacer(),
+                  const Text('€0,60', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  if (_maxPriceFilter != null)
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setState(() => _maxPriceFilter = null);
+                          Navigator.pop(ctx);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: AppColors.divider),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Filter wissen',
+                          style: GoogleFonts.inter(
+                              color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ),
+                  if (_maxPriceFilter != null) const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() => _maxPriceFilter = localValue);
+                        Navigator.pop(ctx);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: Text(
+                        'Toepassen',
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // kaart. Bereikbaar via de "Wat betekenen de markers?" chip in de
+  // filter-rij (task #309). Gebruikt dezelfde canvas-builders als de kaart
+  // zelf zodat de icoontjes in de legende 1-op-1 matchen met wat de user
+  // ziet — geen risico op drift tussen legende en werkelijke rendering.
+  void _showMarkerLegend(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Handvat
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Wat zie je op de kaart?',
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Aan de kleur en het icoon zie je meteen wat een paal kan.',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _legendRow(
+                  icon: Icons.bolt_rounded,
+                  iconBg: AppColors.primary,
+                  iconColor: Colors.white,
+                  title: 'Start in app (smart)',
+                  body:
+                      'Je start en stopt de laadsessie in de Pluggo-app. '
+                      'Stekker erin, drukken op "Start laden nu", klaar.',
+                ),
+                _legendRow(
+                  icon: Icons.circle_outlined,
+                  iconBg: Colors.white,
+                  iconColor: AppColors.primary,
+                  title: 'Handmatig',
+                  body:
+                      'Je regelt aan/uit fysiek bij de paal (bijv. met een '
+                      'laadpas of knop). Boeken en betalen loopt gewoon via '
+                      'de app.',
+                ),
+                _legendRow(
+                  icon: Icons.wb_sunny_rounded,
+                  iconBg: AppColors.solar,
+                  iconColor: Colors.white,
+                  title: 'Zonne-energie',
+                  body:
+                      'De eigenaar heeft zonnepanelen. Overdag laden = groene '
+                      'stroom van eigen dak.',
+                ),
+                _legendRow(
+                  icon: Icons.location_on_rounded,
+                  iconBg: AppColors.danger,
+                  iconColor: Colors.white,
+                  title: 'Niet beschikbaar',
+                  body: 'Paal staat tijdelijk offline of is niet boekbaar.',
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.lightbulb_outline_rounded,
+                          size: 18, color: AppColors.primaryDark),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Combinatie mogelijk: een solar-paal met een klein '
+                          '⚡-badge kan zowel via de app worden gestart als '
+                          'zonne-energie leveren.',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.primaryDark,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.center,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: Text(
+                      'Duidelijk!',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Eén rij in de marker-legende: gekleurd icoon-blokje links, titel en
+  // korte body-tekst rechts. Bewust simpel gehouden zodat toevoegen van
+  // een vijfde variant (later, bv. "reserveerbaar via B2B-partner") niet
+  // meteen een refactor vraagt.
+  Widget _legendRow({
+    required IconData icon,
+    required Color iconBg,
+    required Color iconColor,
+    required String title,
+    required String body,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: iconBg,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: softShadow,
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 18, color: iconColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  body,
+                  style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    height: 1.35,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -5109,6 +6314,12 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
   bool _cableIncluded = true;
   String _accessType = 'open';
   bool _saving = false;
+  // OCPP app-koppeling: als de eigenaar dit aanvinkt, laden we na "Paal
+  // toevoegen" de CouplingWizardScreen (task #311) i.p.v. direct door te
+  // gaan naar de beschikbaarheids-instellingen. Non-checked = klassieke
+  // manueel-flow. Default false zodat we niks forceren voor eigenaren
+  // van oudere/dumb palen. Zie task #310.
+  bool _wantsOcppCoupling = false;
 
   // Coords van het door user gekozen Google Places-adres. Null = nog niks
   // gekozen (of selectie overschreven door verder typen). Bij submit moet
@@ -5380,6 +6591,39 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
       final newCharger = Charger.fromMap(freshRow, isExactLocation: true);
 
       if (!mounted) return;
+      // Vertakking task #310: smart palen sturen we eerst door de
+      // CouplingWizardScreen (merk → instructies → gegevens → test). Pas
+      // wanneer 'ie succesvol koppelt gaan we door naar de beschikbaarheids-
+      // instellingen. Als de owner de wizard cancelt komt 'ie alsnog op
+      // AvailabilityScreen uit — de paal bestaat immers al, koppeling kan
+      // ook later via EditChargerScreen (task #313).
+      //
+      // Bij "manueel" (default) verandert er niks t.o.v. de oude flow —
+      // AddChargerScreen → AvailabilityScreen zoals altijd.
+      if (_wantsOcppCoupling) {
+        await Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => CouplingWizardScreen(
+              charger: newCharger,
+              // Nadat de wizard klaar/gecanceld is doorstromen naar
+              // AvailabilityScreen. Wizard doet deze push zelf zodat we
+              // hier één centraal punt hebben voor "wat na koppeling".
+              onDone: (BuildContext ctx) {
+                Navigator.of(ctx).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) => AvailabilityScreen(
+                      charger: newCharger,
+                      isInitialSetup: true,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+        return;
+      }
+
       // pushReplacement: na opslaan in AvailabilityScreen pop't 'ie met `true`
       // door naar de oorspronkelijke aanroeper (Mijn palen / Home), die
       // dan z'n lijst verversen. AddChargerScreen verdwijnt dus uit de stack.
@@ -5595,6 +6839,46 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 24),
+            // === App-koppeling (smart vs manueel) — task #310 ===
+            // Twee radio-achtige tiles waarmee de eigenaar kiest of z'n paal
+            // via de app te bedienen moet zijn. Bij "smart" openen we na
+            // opslaan de koppelwizard (task #311). Bij "manueel" (default)
+            // ga je gewoon naar de beschikbaarheids-instellingen zoals
+            // voorheen — bewust géén friction voor eigenaren van oudere
+            // palen. Copy is heel expliciet zodat een leek meteen snapt
+            // wat 't verschil is.
+            _label('App-koppeling'),
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 8),
+              child: Text(
+                'Kies of boekers hun laadsessie via de Pluggo-app moeten '
+                'kunnen starten, of dat ze aan/uit fysiek bij de paal '
+                'regelen (bijv. met een laadpas).',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ),
+            _couplingChoiceTile(
+              selected: !_wantsOcppCoupling,
+              icon: Icons.power_rounded,
+              title: 'Handmatig (aanbevolen voor oudere palen)',
+              body:
+                  'Boekers regelen aan/uit fysiek bij je paal. Boeken en '
+                  'betalen loopt gewoon via de app.',
+              onTap: () => setState(() => _wantsOcppCoupling = false),
+            ),
+            const SizedBox(height: 10),
+            _couplingChoiceTile(
+              selected: _wantsOcppCoupling,
+              icon: Icons.bolt_rounded,
+              title: 'Koppel via app (OCPP 1.6J)',
+              body:
+                  'Boekers starten en stoppen hun laadsessie in de app. '
+                  'Werkt met de meeste palen van na 2018 (Alfen, Wallbox, '
+                  'Vestel, Zaptec, ABL, KEBA…). Na opslaan starten we een '
+                  'korte koppelwizard.',
+              onTap: () => setState(() => _wantsOcppCoupling = true),
+            ),
             const SizedBox(height: 20),
             _label('Omschrijving'),
             Container(
@@ -5718,6 +7002,116 @@ class _AddChargerScreenState extends State<AddChargerScreen> {
           prefixIcon: Icon(icon, color: AppColors.primary),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+      ),
+    );
+  }
+
+  // Radio-achtige tile voor de "handmatig vs koppel via app" keuze (task #310).
+  // Bewust géén Material Radio-widget gebruikt — die zien er in prijs-context
+  // budget-uit, en we willen dat de user meteen ziet dat dit géén "vinkje
+  // extra" is maar een fundamentele keuze. Design mirrort de choice-tiles die
+  // we op de betaal-onboarding hebben (Stripe Connect intro).
+  Widget _couplingChoiceTile({
+    required bool selected,
+    required IconData icon,
+    required String title,
+    required String body,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primarySoft : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? AppColors.primary
+                : Colors.black.withOpacity(0.08),
+            width: selected ? 2 : 1,
+          ),
+          boxShadow: selected
+              ? []
+              : [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppColors.primary
+                    : AppColors.primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                color: selected ? Colors.white : AppColors.primary,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    body,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Radio-indicator: buitenring altijd zichtbaar, binnenpunt alleen
+            // bij `selected`. Zit rechts zodat 'ie op ~elk telefoonformaat op
+            // dezelfde vertical baseline als de icon-badge landt.
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? AppColors.primary : AppColors.divider,
+                    width: 2,
+                  ),
+                ),
+                child: selected
+                    ? Center(
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: const BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -6018,6 +7412,1664 @@ class _AddressAutocompleteFieldState extends State<_AddressAutocompleteField> {
       ],
     );
   }
+}
+
+// ============================================================================
+// CouplingWizardScreen — task #311 (+ #312 help-sheet)
+// ----------------------------------------------------------------------------
+// Guides an owner through the CSMS coupling of a fresh (or existing) paal.
+// Four steps:
+//   1. Merk selectie  — user tikt op z'n paal-merk (Alfen, Wallbox, Vestel,
+//      Zaptec, ABL, KEBA, EVBox, Wallbox Pulsar, Easee, Schneider, …). Voor
+//      ieder merk hebben we een korte "hoe kom je in de web-UI"-guide.
+//   2. Instructies    — merkspecifieke tekst met screenshots-tip die uitlegt
+//      hoe je in de paal-UI de CSMS-URL / Basic Auth invoert.
+//      Alle merken krijgen dezelfde ws:// endpoint van ons: die valt in step 3
+//      te copy-pasten.
+//   3. Gegevens       — user vult (a) OCPP charge point identity in (staat vaak
+//      op de paal of in de web-UI onder "ChargeBoxIdentity"/"ChargePointID"),
+//      (b) een password dat ze zelf kiezen. Wij pushen de gegenereerde endpoint
+//      URL + user/pass richting Supabase Edge Function `ocpp-provision-charger`
+//      die 'em op onze CSMS whitelist zet en de row in `chargers` update
+//      met `ocpp_charger_id`.
+//   4. Test-verbinding — polling-loop op sessions/heartbeat: wachten tot de
+//      paal binnen 3 min z'n eerste BootNotification stuurt. Succes → done.
+//      Time-out → tips + link naar help-sheet (task #312).
+//
+// State machine leaves de wizard in één van drie eindstates:
+//   - success  → onDone() draait door naar AvailabilityScreen
+//   - skip     → user tikt "Later koppelen", zelfde onDone() maar we tonen
+//                een subtile hint dat ze 't via paal-instellingen kunnen doen
+//   - fail     → user krijgt "Iets ging mis" met help-CTA; op close: onDone
+//
+// Design principe: één scherm per step, PageController horizontaal met
+// blocking-swipe (physics: NeverScrollableScrollPhysics) — we managen de
+// forward/back knoppen zelf zodat validatie per step werkt.
+// ============================================================================
+class CouplingWizardScreen extends StatefulWidget {
+  final Charger charger;
+  // Called once the wizard's finished (success, skip, or fail-and-close).
+  // Aanroeper is verantwoordelijk voor de volgende navigatie (bv. door naar
+  // AvailabilityScreen). We geven `ctx` door zodat de callback zelf een
+  // pushReplacement kan doen (deze widget zit dan al niet meer in de stack).
+  final void Function(BuildContext ctx) onDone;
+
+  const CouplingWizardScreen({
+    Key? key,
+    required this.charger,
+    required this.onDone,
+  }) : super(key: key);
+
+  @override
+  State<CouplingWizardScreen> createState() => _CouplingWizardScreenState();
+}
+
+// Merk-preset: tekst-instructies die we per merk tonen in step 2.
+// Bewust hardcoded (geen backend fetch) — de instructies wijzigen zelden en
+// een remote-fetch-flakkering hier zou UX-desaster zijn tijdens setup.
+class _CouplingBrand {
+  final String id;
+  final String name;
+  final String tagline;      // 1 regel op de merk-tile
+  final IconData icon;
+  final List<String> steps;  // merkspecifieke stappen
+  final String? webUiHint;   // "Open http://... in browser als paal en telefoon
+                             // op hetzelfde WiFi zitten." Null = niet van
+                             // toepassing.
+  const _CouplingBrand({
+    required this.id,
+    required this.name,
+    required this.tagline,
+    required this.icon,
+    required this.steps,
+    this.webUiHint,
+  });
+}
+
+const List<_CouplingBrand> _kCouplingBrands = [
+  _CouplingBrand(
+    id: 'alfen',
+    name: 'Alfen',
+    tagline: 'Eve Single / Pro-line',
+    icon: Icons.bolt_rounded,
+    webUiHint:
+        'Sluit je telefoon aan op het WiFi-netwerk van de paal (SSID: "ACE-"…) '
+        'en open dan Alfen ACE Service Installer app of http://192.168.4.1.',
+    steps: [
+      'Open de Alfen ACE Service Installer (iOS/Android) of ga naar de lokale '
+          'web-UI van je paal.',
+      'Log in met je installateurscode (staat op de paal of in de doos).',
+      'Ga naar "Operator" → "Back-office" en zet OCPP Version op 1.6.',
+      'Vul bij "URL back-office" het endpoint uit stap 3 in.',
+      'Vul bij "Charge Point Identity" een unieke naam in (bijv. "pluggo-<jouw '
+          'naam>"). Onthoud deze — je vult \'m zo in stap 3.',
+      'Kies bij "Authorization mode" voor "Basic Authentication" en vul het '
+          'password uit stap 3 in.',
+      'Save → paal herstart automatisch en verbindt met Pluggo binnen 1-2 min.',
+    ],
+  ),
+  _CouplingBrand(
+    id: 'wallbox',
+    name: 'Wallbox',
+    tagline: 'Pulsar Plus / Copper',
+    icon: Icons.electrical_services_rounded,
+    webUiHint:
+        'Wallbox palen worden geconfigureerd via de myWallbox app of via '
+        'installer.wallbox.com.',
+    steps: [
+      'Open myWallbox app → jouw paal → "Instellingen" → "Verbindingen".',
+      'Kies "OCPP" en zet "OCPP Enabled" aan.',
+      'Selecteer versie 1.6-J.',
+      'Vul WebSocket-URL uit stap 3 in bij "Server URL".',
+      'Vul jouw gekozen Charge Point Identity in bij "Chargebox Identity".',
+      'Zet Authentication op "Basic" en vul password uit stap 3 in.',
+      'Save → paal reboot binnen 60 sec.',
+    ],
+  ),
+  _CouplingBrand(
+    id: 'vestel',
+    name: 'Vestel',
+    tagline: 'EVC04',
+    icon: Icons.power_rounded,
+    webUiHint:
+        'Sluit een LAN-kabel aan of verbind je telefoon met SSID "Vestel-…" en '
+        'open http://192.168.0.10 (admin/admin).',
+    steps: [
+      'Log in op de lokale web-UI van je Vestel EVC04 (IP staat in het '
+          'installatieboekje, meestal 192.168.0.10).',
+      'Ga naar "OCPP" tab.',
+      'Zet OCPP Version op 1.6-JSON.',
+      'Vul Central System URL in met endpoint uit stap 3.',
+      'Vul Chargepoint Identity in met een unieke naam.',
+      'Zet Authorization Mode op "Basic Auth" en vul password uit stap 3 in.',
+      'Save en Reboot → paal verbindt automatisch.',
+    ],
+  ),
+  _CouplingBrand(
+    id: 'zaptec',
+    name: 'Zaptec',
+    tagline: 'Pro / Go',
+    icon: Icons.ev_station_rounded,
+    steps: [
+      'Zaptec biedt geen directe OCPP-configuratie via de eind-gebruiker-app. '
+          'Neem contact op met Zaptec support of jouw installateur en vraag '
+          'om "OCPP 1.6-J native mode aan Central System X".',
+      'Ze hebben van jou nodig: endpoint URL uit stap 3, Chargepoint Identity, '
+          'en Basic Auth password.',
+      'Vul die 3 velden in stap 3 in — en stuur ze door aan Zaptec support.',
+    ],
+  ),
+  _CouplingBrand(
+    id: 'abl',
+    name: 'ABL',
+    tagline: 'eMH1 / eMH2 / eMH3 (Wallbox eMH)',
+    icon: Icons.settings_input_component_rounded,
+    webUiHint: 'Sluit een LAN-kabel aan of gebruik de CONFIG-app van ABL.',
+    steps: [
+      'Open ABL CONFIG-app (iOS/Android) → jouw paal.',
+      'Ga naar "Backend" → "OCPP".',
+      'Zet OCPP Version op 1.6-JSON en Transport op "SecureWebSocket".',
+      'Vul Backend URL uit stap 3 in.',
+      'Vul Chargepoint ID en Basic Auth Password uit stap 3 in.',
+      'Save → paal reboot binnen 30 sec.',
+    ],
+  ),
+  _CouplingBrand(
+    id: 'keba',
+    name: 'KEBA',
+    tagline: 'KeContact P30',
+    icon: Icons.developer_board_rounded,
+    webUiHint:
+        'KEBA gebruikt DIP-switches + de KEBA eMobility Portal voor OCPP-config.',
+    steps: [
+      'Log in op de KEBA eMobility Portal (portal.keba.com).',
+      'Selecteer jouw paal → "OCPP" tab.',
+      'Zet OCPP versie op 1.6-J.',
+      'Vul Central System URL uit stap 3 in.',
+      'Vul Chargebox Identity uit stap 3 in.',
+      'Kies Authorization = Basic Auth en vul password uit stap 3 in.',
+      'Save → paal verbindt binnen 1 min.',
+    ],
+  ),
+  _CouplingBrand(
+    id: 'other',
+    name: 'Andere paal / weet niet zeker',
+    tagline: 'We helpen je persoonlijk',
+    icon: Icons.help_center_rounded,
+    steps: [
+      'Als je paal OCPP 1.6-J ondersteunt kunnen we \'m koppelen. Meeste palen '
+          'van na 2018 doen dit — check de doos of installatie-handleiding.',
+      'Log in op de web-UI of app van je paal (vaak via het merk zelf) en '
+          'zoek naar "OCPP", "Backend" of "Central System".',
+      'Vul daar het endpoint uit stap 3 in, samen met een chargepoint identity '
+          '(naam) en een password dat je zelf kiest.',
+      'Kom je er niet uit? Tik onderaan op "Persoonlijke hulp nodig?" — we '
+          'kijken binnen 24u met je mee.',
+    ],
+  ),
+];
+
+class _CouplingWizardScreenState extends State<CouplingWizardScreen> {
+  final PageController _pageController = PageController();
+  int _stepIndex = 0;
+
+  // Step 1 state.
+  _CouplingBrand? _selectedBrand;
+  // True als de eigenaar aangeeft dat zijn paal al gekoppeld was aan een
+  // ander systeem (installateur-backoffice, fabrikant-app, etc.). Stap 2
+  // toont dan extra uitleg over hoe je de bestaande URL vervangen.
+  bool _previouslyConnected = false;
+
+  // Step 3 state.
+  final TextEditingController _identityCtrl = TextEditingController();
+  final TextEditingController _passwordCtrl = TextEditingController();
+  bool _showPassword = false;
+
+  // Onze centrale CSMS endpoint. Wordt door de Edge Function ook nog eens
+  // geretourneerd zodat we hier ooit kunnen wisselen zonder release. Voor
+  // nu hardcoded — is stabiel sinds task #266.
+  static const String _ocppEndpoint = 'wss://ocpp.pluggo.eu/ocpp';
+
+  // Step 4 state.
+  bool _provisioning = false;
+  bool _testConnecting = false;
+  String? _testError;
+  bool _testSuccess = false;
+  Timer? _testPoller;
+  DateTime? _testStartedAt;
+
+  // Toon een "we hebben je gegevens ontvangen, maar nog geen BootNotification"
+  // tussenstate zodat de user niet denkt dat 'ie voor niks wacht.
+  bool _testWaitingHeartbeat = false;
+
+  // MID-vraag: gezet op het succes-scherm. Null = nog niet beantwoord.
+  // Na antwoord: update chargers.has_mid_meter in Supabase.
+  bool? _hasMidMeter;
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _identityCtrl.dispose();
+    _passwordCtrl.dispose();
+    _testPoller?.cancel();
+    super.dispose();
+  }
+
+  void _goTo(int step) {
+    if (!mounted) return;
+    setState(() => _stepIndex = step);
+    _pageController.animateToPage(
+      step,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Future<bool> _confirmExit() async {
+    if (_testSuccess) return true;
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Koppeling afbreken?'),
+        content: const Text(
+          'Je kunt de koppelwizard later opnieuw starten via '
+          'Paal-instellingen → "Koppel deze paal". Zonder koppeling wordt '
+          'je paal als handmatige paal getoond.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Terug'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Afbreken'),
+          ),
+        ],
+      ),
+    );
+    return leave == true;
+  }
+
+  Future<void> _provisionAndTest() async {
+    if (_identityCtrl.text.trim().isEmpty || _passwordCtrl.text.length < 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Vul zowel Charge Point Identity als een password van min. 8 tekens in.',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _provisioning = true;
+      _testError = null;
+    });
+    try {
+      // Edge Function `ocpp-provision-charger` — bestaat sinds task #266.
+      // Neemt (charger_id, ocpp_identity, ocpp_password) en:
+      //   1. Whitelistet de identity + hash(password) in de CSMS `chargers`-tabel
+      //   2. Update `public.chargers` van deze paal met ocpp_charger_id = identity
+      //   3. Retourneert de endpoint + realtime status
+      final resp = await supabase.functions.invoke(
+        'ocpp-provision-charger',
+        body: {
+          'charger_id': widget.charger.id,
+          'ocpp_identity': _identityCtrl.text.trim(),
+          'ocpp_password': _passwordCtrl.text,
+        },
+      );
+      final data = resp.data;
+      if (data is Map && data['ok'] == true) {
+        setState(() {
+          _provisioning = false;
+          _testConnecting = true;
+          _testWaitingHeartbeat = true;
+          _testStartedAt = DateTime.now();
+        });
+        _startBootPolling();
+      } else {
+        final msg = (data is Map && data['error'] is String)
+            ? data['error'] as String
+            : 'Provisioning mislukt — probeer \'t nog eens.';
+        setState(() {
+          _provisioning = false;
+          _testError = msg;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _provisioning = false;
+        _testError = 'Netwerkfout: $e';
+      });
+    }
+  }
+
+  Future<void> _saveMidMeter(bool hasMid) async {
+    setState(() => _hasMidMeter = hasMid);
+    // Sla op in Supabase — fire-and-forget, niet kritisch voor de flow.
+    try {
+      await supabase
+          .from('chargers')
+          .update({'has_mid_meter': hasMid})
+          .eq('id', widget.charger.id);
+    } catch (_) {
+      // Stil falen — eigenaar kan dit later via paal-instellingen aanpassen.
+    }
+  }
+
+  void _startBootPolling() {
+    // Poll iedere 3 sec of de paal via de CSMS een BootNotification /
+    // Heartbeat heeft binnengetikt. 3 min timeout. Zie #269 voor de
+    // sessions/heartbeat-view die dit voedt.
+    _testPoller?.cancel();
+    _testPoller = Timer.periodic(const Duration(seconds: 3), (t) async {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      final started = _testStartedAt;
+      if (started != null &&
+          DateTime.now().difference(started).inSeconds > 180) {
+        t.cancel();
+        if (!mounted) return;
+        setState(() {
+          _testConnecting = false;
+          _testWaitingHeartbeat = false;
+          _testError =
+              'Geen verbinding binnen 3 min. Controleer of je paal aanstaat, '
+              'internet heeft, en of je de instructies uit stap 2 goed hebt '
+              'gevolgd.';
+        });
+        return;
+      }
+      try {
+        final row = await supabase
+            .from('ocpp_charger_status')
+            .select('last_boot_at, online')
+            .eq('charger_id', widget.charger.id)
+            .maybeSingle();
+        final bootAt = row?['last_boot_at'];
+        final online = row?['online'] == true;
+        if (bootAt != null && online) {
+          t.cancel();
+          if (!mounted) return;
+          setState(() {
+            _testConnecting = false;
+            _testWaitingHeartbeat = false;
+            _testSuccess = true;
+          });
+        }
+      } catch (_) {
+        // Non-fataal, poll blijft doorlopen tot timeout.
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: _confirmExit,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.close, color: AppColors.textPrimary),
+            onPressed: () async {
+              if (await _confirmExit() && mounted) {
+                widget.onDone(context);
+              }
+            },
+          ),
+          title: Text(
+            'Koppelwizard (${_stepIndex + 1}/4)',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: _showHelpSheet,
+              child: const Text('Hulp'),
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            // Progress bar bovenaan.
+            LinearProgressIndicator(
+              value: (_stepIndex + 1) / 4,
+              color: AppColors.primary,
+              backgroundColor: AppColors.primary.withOpacity(0.15),
+              minHeight: 3,
+            ),
+            Expanded(
+              child: PageView(
+                controller: _pageController,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _buildStepBrand(),
+                  _buildStepInstructions(),
+                  _buildStepCredentials(),
+                  _buildStepTest(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---- Step 1: brand picker --------------------------------------------------
+  Widget _buildStepBrand() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Welke laadpaal heb je?',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'We tonen zo instructies op maat voor jouw merk. Weet je \'t niet '
+            'zeker? Kies "Andere paal".',
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          // Sticker-tip — amber banner
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF8E1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFFFE082)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Icon(Icons.photo_camera_rounded,
+                    color: Color(0xFFF9A825), size: 20),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Tip: maak nu een foto van de sticker in je paal. '
+                    'Daar staan het serienummer en de standaard-inloggegevens op — '
+                    'die heb je zo nodig. Eén keer een sticker kwijt = uren zoeken.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF5D4037),
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // "Al eerder gekoppeld"-toggle
+          InkWell(
+            onTap: () =>
+                setState(() => _previouslyConnected = !_previouslyConnected),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _previouslyConnected
+                    ? AppColors.primarySoft
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _previouslyConnected
+                      ? AppColors.primary
+                      : Colors.black.withOpacity(0.08),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _previouslyConnected
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded,
+                    color: _previouslyConnected
+                        ? AppColors.primary
+                        : AppColors.textSecondary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Mijn paal was al gekoppeld aan een ander systeem '
+                      '(installateur, andere app)',
+                      style: TextStyle(
+                          fontSize: 13, color: AppColors.textPrimary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ..._kCouplingBrands.map((b) {
+            final selected = _selectedBrand?.id == b.id;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: InkWell(
+                onTap: () => setState(() => _selectedBrand = b),
+                borderRadius: BorderRadius.circular(14),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: selected ? AppColors.primarySoft : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: selected
+                          ? AppColors.primary
+                          : Colors.black.withOpacity(0.08),
+                      width: selected ? 2 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? AppColors.primary
+                              : AppColors.primary.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          b.icon,
+                          color: selected ? Colors.white : AppColors.primary,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              b.name,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              b.tagline,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selected)
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: AppColors.primary,
+                        )
+                      else
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textSecondary,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _selectedBrand == null ? null : () => _goTo(1),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Volgende',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: TextButton(
+              onPressed: () async {
+                if (await _confirmExit() && mounted) {
+                  widget.onDone(context);
+                }
+              },
+              child: const Text('Later koppelen'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- Step 2: brand-specific instructions ----------------------------------
+  Widget _buildStepInstructions() {
+    final brand = _selectedBrand ?? _kCouplingBrands.last;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(brand.icon, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${brand.name}: OCPP-instellingen openen',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // "Al eerder gekoppeld"-banner — alleen als aangevinkt in stap 1
+          if (_previouslyConnected) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFFE082)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Row(
+                    children: [
+                      Icon(Icons.swap_horiz_rounded,
+                          color: Color(0xFFF9A825), size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'Paal omzetten van ander systeem',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF5D4037),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Je paal is al ergens aan gekoppeld. Volg onderstaande '
+                    'stappen om de bestaande OCPP-URL te vervangen door die '
+                    'van Pluggo. De instructies zijn hetzelfde — je zoekt '
+                    'naar het veld "Backend URL" / "Central System URL" / '
+                    '"OCPP Server" en vervangt wat er al staat.\n\n'
+                    'Wachtwoord/inloggegevens voor de web-UI kwijt? Check de '
+                    'sticker in de paal of bel je installateur. Bij Alfen kun '
+                    'je de ACE-app gebruiken als je het WiFi-netwerk van de '
+                    'paal (SSID: "ACE-…") kunt bereiken.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF5D4037),
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (brand.webUiHint != null) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.tips_and_updates_rounded,
+                    color: AppColors.primary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      brand.webUiHint!,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textPrimary,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          const Text(
+            'Stap voor stap',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...brand.steps.asMap().entries.map((e) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '${e.key + 1}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      e.value,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _goTo(0),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Terug'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: () => _goTo(2),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Gegevens invullen',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- Step 3: credentials --------------------------------------------------
+  Widget _buildStepCredentials() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'OCPP-gegevens',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Kopieer onderstaand endpoint in de web-UI van je paal, en '
+            'kies zelf een Charge Point Identity + password. Vul die '
+            'gegevens ook hieronder in — dan whitelisten wij ze op onze '
+            'CSMS.',
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Endpoint URL',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.black.withOpacity(0.08)),
+            ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: SelectableText(
+                    _ocppEndpoint,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy_rounded, size: 20),
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      const ClipboardData(text: _ocppEndpoint),
+                    );
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Endpoint gekopieerd'),
+                        backgroundColor: AppColors.primary,
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Charge Point Identity',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.black.withOpacity(0.08)),
+            ),
+            child: TextField(
+              controller: _identityCtrl,
+              decoration: const InputDecoration(
+                hintText: 'bijv. pluggo-jan',
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 4, top: 6),
+            child: Text(
+              'Alleen kleine letters, cijfers en streepjes. Moet uniek zijn.',
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Password',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.black.withOpacity(0.08)),
+            ),
+            child: TextField(
+              controller: _passwordCtrl,
+              obscureText: !_showPassword,
+              decoration: InputDecoration(
+                hintText: 'Min. 8 tekens',
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _showPassword
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                    size: 20,
+                  ),
+                  onPressed: () =>
+                      setState(() => _showPassword = !_showPassword),
+                ),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 4, top: 6),
+            child: Text(
+              'Kies iets sterks — deze gebruikt je paal om te bewijzen dat \'ie '
+              'echt van jou is.',
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _goTo(1),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Terug'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    if (_identityCtrl.text.trim().isEmpty ||
+                        _passwordCtrl.text.length < 8) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Vul een identity in + password van min. 8 tekens.',
+                          ),
+                          backgroundColor: Colors.redAccent,
+                        ),
+                      );
+                      return;
+                    }
+                    _goTo(3);
+                    // Kick off provisioning + polling zodra step 4 open is.
+                    await _provisionAndTest();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Test verbinding',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- Step 4: test connection ---------------------------------------------
+  Widget _buildStepTest() {
+    Widget content;
+    if (_testSuccess) {
+      content = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(48),
+            ),
+            child: const Icon(
+              Icons.check_rounded,
+              color: Colors.white,
+              size: 56,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Je paal is gekoppeld!',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              'Boekers kunnen hun laadsessies vanaf nu via de app '
+              'starten en stoppen. Je paal krijgt op de kaart een '
+              '⚡ smart-badge.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+                height: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 28),
+          // MID-vraag — alleen tonen als nog niet beantwoord
+          if (_hasMidMeter == null) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.black.withOpacity(0.08)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Heeft je paal een MID-gecertificeerde meter?',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Een MID-meter maakt officiële ERE-aanvragen mogelijk. '
+                    'Staat in de specificaties van je paal of op de sticker.',
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary, height: 1.4),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _saveMidMeter(false),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: const Text('Nee / weet niet'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => _saveMidMeter(true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: const Text('Ja, MID-meter'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ] else ...[
+            // MID-antwoord bevestiging
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _hasMidMeter! ? AppColors.primarySoft : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _hasMidMeter! ? Icons.verified_rounded : Icons.lock_rounded,
+                    color: _hasMidMeter! ? AppColors.primary : AppColors.textSecondary,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _hasMidMeter!
+                        ? 'MID-meter bevestigd — ERE-tegel actief'
+                        : 'Geen MID-meter — ERE-tegel toont slot-icoontje',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: _hasMidMeter! ? AppColors.primary : AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => widget.onDone(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text(
+                  'Beschikbaarheid instellen',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        ],
+      );
+    } else if (_testError != null) {
+      content = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              color: AppColors.danger.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(48),
+            ),
+            child: const Icon(
+              Icons.error_outline_rounded,
+              color: AppColors.danger,
+              size: 56,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Kon geen verbinding maken',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              _testError!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      setState(() {
+                        _testError = null;
+                        _testStartedAt = null;
+                      });
+                      _goTo(2);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Gegevens aanpassen'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _showHelpSheet,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Persoonlijke hulp'),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextButton(
+                  onPressed: () => widget.onDone(context),
+                  child: const Text('Later koppelen'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    } else {
+      // In progress: provisioning of wachten op BootNotification.
+      final elapsed = _testStartedAt == null
+          ? 0
+          : DateTime.now().difference(_testStartedAt!).inSeconds;
+      content = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 72,
+            height: 72,
+            child: CircularProgressIndicator(
+              strokeWidth: 4,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            _provisioning
+                ? 'Whitelisten op onze CSMS…'
+                : _testWaitingHeartbeat
+                    ? 'Wachten tot je paal verbinding maakt…'
+                    : 'Verbinden…',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 30),
+            child: Text(
+              _provisioning
+                  ? 'Even geduld, dit duurt max 5 sec.'
+                  : 'Zorg dat je paal aanstaat en internet heeft. '
+                      'Meeste palen verbinden binnen 60 sec. '
+                      '(${elapsed}s / 180s)',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+      child: content,
+    );
+  }
+
+  // ---- Help sheet (task #312) ----------------------------------------------
+  // Bottom sheet met "Persoonlijke hulp"-CTA die een mailto: opent naar
+  // support@pluggo.eu, met alle koppel-context al voorgevuld. Belofte: 24u
+  // antwoord. Dit is de vangnet-flow voor eigenaren die vastlopen op merk-
+  // specifieke settings die we niet in de wizard-instructies kunnen vangen.
+  void _showHelpSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 12,
+              bottom: 20 + MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.support_agent_rounded,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Persoonlijke hulp nodig?',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // FAQ
+                ...[
+                  (
+                    'Ik weet mijn installateurscode niet meer',
+                    'De code staat op de sticker in of achter op de paal, '
+                        'of in de doos. Bij Alfen: stuur een foto van het typeplaatje '
+                        'naar support@alfen.com of gebruik de ACE-app via het WiFi van '
+                        'de paal (SSID: "ACE-…"). Bij andere merken: bel je installateur.'
+                  ),
+                  (
+                    'Mijn paal was al aan een ander systeem gekoppeld',
+                    'Ga terug naar stap 1 en vink "Mijn paal was al gekoppeld" aan. '
+                        'Je krijgt dan extra uitleg hoe je de bestaande URL vervangt. '
+                        'De stappen zijn hetzelfde — alleen het veld "Backend URL" '
+                        'heeft al een waarde die je overschrijft met die van Pluggo.'
+                  ),
+                  (
+                    'De verbindingstest loopt vast of geeft timeout',
+                    '(1) Controleer of de paal stroom heeft en internet. '
+                        '(2) Gebruik de kopieer-knop voor de URL — typefouten zijn '
+                        'de meest voorkomende oorzaak. '
+                        '(3) Zet de paal even uit en aan. '
+                        '(4) Sommige palen verbinden pas na 2-3 minuten — wacht even '
+                        'voordat je opnieuw probeert.'
+                  ),
+                  (
+                    'Ik heb geen sticker meer op mijn paal',
+                    'Het serienummer staat ook in de web-UI van de paal zelf '
+                        '(log in via het WiFi-netwerk van de paal of via de app van '
+                        'het merk). Bij Alfen staat het in de ACE-app onder "Device info". '
+                        'Kom je er niet uit, stuur ons dan een mailtje — we helpen zoeken.'
+                  ),
+                ].map((faq) => _faqItem(faq.$1, faq.$2)),
+                const Divider(height: 24),
+                const Text(
+                  'Kom je er nog steeds niet uit?',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'We kijken graag met je mee. Stuur ons een mailtje — '
+                  'we vullen alvast de context van jouw paal in. '
+                  'Reactietijd: binnen 24 uur op werkdagen.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _helpContextRow('Paal-ID',
+                          widget.charger.id.substring(0, 8)),
+                      _helpContextRow(
+                          'Merk', _selectedBrand?.name ?? '(nog niet gekozen)'),
+                      _helpContextRow(
+                          'Identity', _identityCtrl.text.isEmpty
+                              ? '(nog niet ingevuld)'
+                              : _identityCtrl.text),
+                      _helpContextRow(
+                          'Status',
+                          _testSuccess
+                              ? 'Gekoppeld ✓'
+                              : _testError != null
+                                  ? 'Test mislukt'
+                                  : _testConnecting
+                                      ? 'Wachten op paal'
+                                      : 'Wizard bezig'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.email_rounded, size: 18),
+                    label: const Text('Mail naar support@pluggo.eu'),
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await _sendHelpMail();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _faqItem(String question, String answer) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.help_outline_rounded,
+                  size: 16, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  question,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 22, top: 4),
+            child: Text(
+              answer,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _helpContextRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 76,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendHelpMail() async {
+    // Bouw een mailto: met context al voorgevuld — user hoeft alleen z'n vraag
+    // eronder te tikken. url_launcher opent de default mail-app.
+    final subject = Uri.encodeComponent(
+      'Hulp bij paal-koppeling — ${_selectedBrand?.name ?? "onbekend merk"}',
+    );
+    final body = Uri.encodeComponent(
+      'Hoi Pluggo,\n\n'
+      'Ik loop vast tijdens het koppelen van mijn paal. Kunnen jullie meekijken?\n\n'
+      '— Mijn vraag/opmerking hieronder —\n\n\n'
+      '\n\n---\n'
+      'Context (niet verwijderen, dit helpt ons je snel te helpen):\n'
+      'Paal-ID: ${widget.charger.id}\n'
+      'Paal-naam: ${widget.charger.name}\n'
+      'Adres: ${widget.charger.address}\n'
+      'Merk: ${_selectedBrand?.name ?? "(nog niet gekozen)"}\n'
+      'Charge Point Identity: ${_identityCtrl.text}\n'
+      'Endpoint: $_ocppEndpoint\n'
+      'Test-status: ${_testSuccess ? "gekoppeld" : _testError ?? "in progress"}\n',
+    );
+    final uri = Uri.parse('mailto:support@pluggo.eu?subject=$subject&body=$body');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon mail-app niet openen: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
 }
 
 // ============================================================================
@@ -6572,6 +9624,21 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
               ),
             ),
             const SizedBox(height: 20),
+            // === Koppel deze paal-sectie — task #313 ===
+            // Achteraf koppelen van bestaande palen aan het Pluggo CSMS.
+            // Twee states:
+            //   • ocppChargerId == null → we tonen een CTA-tile "Koppel deze
+            //     paal via app" die de CouplingWizardScreen opent.
+            //   • ocppChargerId != null → we tonen een success-tile "Deze paal
+            //     is gekoppeld" + een discrete "Ontkoppelen"-knop (voor als de
+            //     eigenaar 'em terug wil switchen naar manueel, bv. bij defect
+            //     of vervanging paal).
+            //
+            // Bewust in de bestaande scroll gepositioneerd — géén aparte
+            // "Geavanceerd" sectie. Voor eigenaren van bestaande manuele palen
+            // is dit dé plek om upsell naar smart te doen.
+            _couplingSection(),
+            const SizedBox(height: 20),
             _label('Omschrijving'),
             Container(
               decoration: BoxDecoration(
@@ -6704,6 +9771,222 @@ class _EditChargerScreenState extends State<EditChargerScreen> {
         ),
       ),
     );
+  }
+
+  // Task #313: "Koppel deze paal"-sectie in EditChargerScreen.
+  // Twee states — smart of nog-manueel — verpakt in dezelfde tile-vorm zodat
+  // de scroll-hoogte niet springt tussen renders. Bij "smart" tonen we een
+  // secundaire "Ontkoppelen"-knop; bij "manueel" een primaire "Koppel via
+  // app"-CTA die de wizard opent.
+  Widget _couplingSection() {
+    final isSmart = widget.charger.ocppChargerId != null &&
+        widget.charger.ocppChargerId!.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isSmart
+                      ? AppColors.primary
+                      : AppColors.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  isSmart ? Icons.bolt_rounded : Icons.power_rounded,
+                  color: isSmart ? Colors.white : AppColors.primary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isSmart ? 'App-koppeling actief' : 'Handmatige paal',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isSmart
+                          ? 'Boekers starten en stoppen hun laadsessie in de app.'
+                          : 'Boekers regelen aan/uit fysiek bij de paal.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (isSmart) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.badge_rounded,
+                      size: 14, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'ID: ${widget.charger.ocppChargerId}',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _saving || _deleting ? null : _unlinkCoupling,
+                icon: const Icon(Icons.link_off_rounded, size: 18),
+                label: const Text('Ontkoppelen (terug naar handmatig)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.danger,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  side: const BorderSide(color: AppColors.danger, width: 1),
+                ),
+              ),
+            ),
+          ] else ...[
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _saving || _deleting
+                    ? null
+                    : () async {
+                        // Push naar wizard; als 'ie succesvol koppelt komt de
+                        // updated `ocppChargerId` op de charger-row te staan.
+                        // Bij terugkomst pop'en we onszelf zodat MyChargers de
+                        // paal met verse waardes ophaalt.
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CouplingWizardScreen(
+                              charger: widget.charger,
+                              onDone: (ctx) => Navigator.of(ctx).pop(),
+                            ),
+                          ),
+                        );
+                        if (!mounted) return;
+                        // Signal terug naar de aanroeper dat er iets veranderd
+                        // kan zijn (list-refresh).
+                        Navigator.of(context).pop(true);
+                      },
+                icon: const Icon(Icons.bolt_rounded, size: 18),
+                label: const Text('Koppel via app (OCPP 1.6J)'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _unlinkCoupling() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Paal ontkoppelen?'),
+        content: const Text(
+          'Boekers kunnen dan geen laadsessies meer via de app starten. '
+          'Actieve boekingen blijven doorlopen tot ze aflopen. Je kunt '
+          'later opnieuw koppelen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuleren'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ontkoppelen'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _saving = true);
+    try {
+      // Edge Function `ocpp-deprovision-charger` haalt de identity van de
+      // CSMS whitelist én zet `ocpp_charger_id = null` op public.chargers.
+      // Twee-staps in één RPC zodat een half-state (whitelist weg, kolom
+      // nog wel gezet) niet kan gebeuren.
+      final resp = await supabase.functions.invoke(
+        'ocpp-deprovision-charger',
+        body: {'charger_id': widget.charger.id},
+      );
+      if (!mounted) return;
+      final ok = resp.data is Map && resp.data['ok'] == true;
+      if (ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Paal ontkoppeld — nu weer handmatig.'),
+            backgroundColor: AppColors.primary,
+          ),
+        );
+        Navigator.of(context).pop(true);
+      } else {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ontkoppelen mislukt — probeer \'t nog eens.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Netwerkfout: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
   Widget _textField({
@@ -6871,6 +10154,15 @@ class _DetailScreenState extends State<DetailScreen> {
   // adres + fuzzy lat/lng staan. Zie migratie 0010.
   bool _hasConfirmedBooking = false;
 
+  // Task #315: de eerstvolgende / lopende confirmed booking van deze user
+  // op deze paal (id + start/end). Voedt de "tijdsblok begint binnenkort"-
+  // banner die T-15 → T+X toont. Null als er geen upcoming/lopende sessie is.
+  String? _upcomingBookingId;
+  DateTime? _upcomingStart;
+  DateTime? _upcomingEnd;
+  // Ticker die iedere 30 sec herrendert zodat de countdown-tekst live meeloopt.
+  Timer? _upcomingTicker;
+
   @override
   void initState() {
     super.initState();
@@ -6924,7 +10216,7 @@ class _DetailScreenState extends State<DetailScreen> {
     try {
       final data = await supabase
           .from('bookings')
-          .select('id, status')
+          .select('id, status, start_time, end_time')
           .eq('charger_id', charger.id)
           .eq('user_id', userId)
           .not('status', 'in', '(cancelled,rejected)');
@@ -6932,10 +10224,48 @@ class _DetailScreenState extends State<DetailScreen> {
       final rows = (data as List).cast<Map<String, dynamic>>();
       final hasActive = rows.isNotEmpty;
       final hasConfirmed = rows.any((r) => r['status'] == 'confirmed');
+
+      // Task #315: peek naar de eerstvolgende (of nu lopende) confirmed
+      // booking om de countdown-banner te voeden. We nemen de rij met de
+      // laatste end_time die nog niet voorbij is — dat is per definitie
+      // de sessie waar de banner over gaat.
+      final now = DateTime.now();
+      Map<String, dynamic>? nextConfirmed;
+      for (final r in rows) {
+        if (r['status'] != 'confirmed') continue;
+        final end = DateTime.tryParse(r['end_time'] as String? ?? '')?.toLocal();
+        if (end == null || end.isBefore(now)) continue;
+        if (nextConfirmed == null) {
+          nextConfirmed = r;
+          continue;
+        }
+        final curStart =
+            DateTime.tryParse(nextConfirmed['start_time'] as String? ?? '')
+                ?.toLocal();
+        final newStart =
+            DateTime.tryParse(r['start_time'] as String? ?? '')?.toLocal();
+        if (curStart != null && newStart != null && newStart.isBefore(curStart)) {
+          nextConfirmed = r;
+        }
+      }
+
       setState(() {
         _hasActiveBooking = hasActive;
         _hasConfirmedBooking = hasConfirmed;
+        _upcomingBookingId = nextConfirmed?['id'] as String?;
+        _upcomingStart = nextConfirmed == null
+            ? null
+            : DateTime.tryParse(nextConfirmed['start_time'] as String? ?? '')
+                ?.toLocal();
+        _upcomingEnd = nextConfirmed == null
+            ? null
+            : DateTime.tryParse(nextConfirmed['end_time'] as String? ?? '')
+                ?.toLocal();
       });
+
+      // Zet/reset de 30-sec ticker als er een upcoming/lopende sessie is.
+      _restartUpcomingTicker();
+
       // Als we net hebben vastgesteld dat er een confirmed booking is en
       // we toonden tot nu toe fuzzy data, swap naar exact via een refresh.
       if (hasConfirmed && !charger.isExactLocation) {
@@ -6944,6 +10274,199 @@ class _DetailScreenState extends State<DetailScreen> {
     } catch (_) {
       // Bij fout houden we 'm gewoon op false
     }
+  }
+
+  // Ticker voor de #315-banner: elke 30 sec setState zodat "over X min" /
+  // "loopt nog Y min" live meeloopt zonder DB-roundtrip.
+  void _restartUpcomingTicker() {
+    _upcomingTicker?.cancel();
+    if (_upcomingBookingId == null) return;
+    _upcomingTicker = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      final end = _upcomingEnd;
+      if (end != null && DateTime.now().isAfter(end)) {
+        // Boeking is voorbij → banner weg, poll opnieuw wanneer relevant.
+        setState(() {
+          _upcomingBookingId = null;
+          _upcomingStart = null;
+          _upcomingEnd = null;
+        });
+        _upcomingTicker?.cancel();
+        return;
+      }
+      setState(() {}); // re-render voor countdown-tekst.
+    });
+  }
+
+  @override
+  void dispose() {
+    _upcomingTicker?.cancel();
+    super.dispose();
+  }
+
+  // Task #315: hulpfunctie voor de "tijdsblok begint binnenkort"-banner.
+  // Retourneert true als er een confirmed booking is die (a) op een smart-
+  // paal loopt en (b) nu in het T-15 → T+end venster valt.
+  //
+  // T-15 grens komt overeen met de remote-start-session grace window (die
+  // is 2 min early server-side, maar wij tonen 'm ruimer zodat de gebruiker
+  // een duidelijke aanloop krijgt: "Over 12 min…" wekt actie op).
+  bool _shouldShowUpcomingBanner() {
+    final start = _upcomingStart;
+    final end = _upcomingEnd;
+    if (start == null || end == null || _upcomingBookingId == null) return false;
+    final ocppId = charger.ocppChargerId;
+    if (ocppId == null || ocppId.isEmpty) return false;
+    final now = DateTime.now();
+    if (now.isBefore(start.subtract(const Duration(minutes: 15)))) return false;
+    if (now.isAfter(end)) return false;
+    return true;
+  }
+
+  // De banner zelf — groen (primary), witte start-knop rechts, live
+  // countdown-tekst links. `_shouldShowUpcomingBanner()` gate voorkomt
+  // dat we hier binnenkomen zonder valide state, dus force-unwrap mag.
+  Widget _buildUpcomingSessionBanner() {
+    final start = _upcomingStart!;
+    final end = _upcomingEnd!;
+    final bookingId = _upcomingBookingId!;
+    final now = DateTime.now();
+    final isRunning = now.isAfter(start);
+
+    // Countdown-tekst. Boven één uur switchen we naar "1 u 15 min" i.p.v.
+    // "75 min" — leest natuurlijker in NL. Onder 1 min tonen we "<1 min"
+    // om afronding op 0 (wat "nu" suggereert) te vermijden.
+    final Duration remaining =
+        isRunning ? end.difference(now) : start.difference(now);
+    final int totalMin = remaining.inMinutes;
+    String prettyDuration;
+    if (totalMin >= 60) {
+      final h = totalMin ~/ 60;
+      final m = totalMin % 60;
+      prettyDuration = m == 0 ? '${h} u' : '${h} u ${m} min';
+    } else if (totalMin <= 0) {
+      prettyDuration = '<1 min';
+    } else {
+      prettyDuration = '${totalMin} min';
+    }
+
+    final title = isRunning
+        ? 'Je laadsessie loopt — nog $prettyDuration'
+        : 'Over $prettyDuration begint je laadsessie';
+    final subtitle = isRunning
+        ? 'Stop wanneer je vertrekt'
+        : 'Kom aan bij de paal en start in de app';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withOpacity(0.28),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.bolt_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.9),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () async {
+                // We navigeren naar het boekingen-scherm i.p.v. hier direct
+                // remote-start-session aan te roepen. Reden: _OcppSessionControls
+                // (task #293) heeft alle state (in-flight, error-toasts,
+                // "Stop laden nu"-flip, LiveChargingCard-transition) al netjes
+                // afgedekt. Één plek = één bron van waarheid. De boeking-ID
+                // is (nog) niet nodig als route-arg — de lijst scrollt vanzelf
+                // naar de eerstvolgende confirmed booking.
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const MyBookingsScreen(),
+                  ),
+                );
+                // Terug van het bookings-scherm: state kan gewijzigd zijn
+                // (sessie gestart/gestopt). Even opnieuw peeken zodat de
+                // banner correct verandert of verdwijnt.
+                if (mounted) {
+                  // ignore: unused_local_variable
+                  final _ = bookingId; // silence unused (documentair houden)
+                  await _checkBooking();
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.play_arrow_rounded,
+                      size: 18,
+                      color: AppColors.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      isRunning ? 'Stop' : 'Start',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _refreshCharger() async {
@@ -7278,39 +10801,113 @@ class _DetailScreenState extends State<DetailScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Tag-rij: zonne-energie + Pionier-badge. Wrap zodat ze
-                  // bij smalle schermen netjes onder elkaar gaan.
-                  if (charger.solar || charger.ownerIsPioneer)
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        if (charger.solar)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: AppColors.solarSoft,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Text(
-                              '☀️ Stroom van zonnepanelen',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFFF9A825),
-                                fontWeight: FontWeight.w500,
+                  // Tag-rij: smart/manueel + zonne-energie + Pionier-badge.
+                  // Wrap zodat ze bij smalle schermen netjes onder elkaar gaan.
+                  // Task #314: smart/manueel badge staat altijd bovenaan zodat
+                  // een boeker in één oogopslag weet of 'ie via de app kan
+                  // starten of naar de paal moet.
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      // Smart badge (⚡) of manueel-badge (🔌). Altijd één van
+                      // de twee zichtbaar — laat geen ambiguïteit over hoe je
+                      // deze paal bedient.
+                      if (charger.ocppChargerId != null &&
+                          charger.ocppChargerId!.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.bolt_rounded,
+                                size: 14,
+                                color: Colors.white,
                               ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Start in app',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppColors.primary,
+                              width: 1.5,
                             ),
                           ),
-                        if (charger.ownerIsPioneer)
-                          const PioneerBadge(
-                              size: PioneerBadgeSize.medium),
-                      ],
-                    ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.power_rounded,
+                                size: 14,
+                                color: AppColors.primary,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Handmatig',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (charger.solar)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.solarSoft,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            '☀️ Stroom van zonnepanelen',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFFF9A825),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      if (charger.ownerIsPioneer)
+                        const PioneerBadge(
+                            size: PioneerBadgeSize.medium),
+                    ],
+                  ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
+            // Task #315: banner bovenaan de detail-pagina wanneer een booker
+            // een confirmed sessie op deze smart-paal heeft en het T-15 →
+            // T+end venster nu actief is. Doet niks als er geen relevante
+            // booking is (returned SizedBox.shrink gate via _shouldShow…).
+            if (_shouldShowUpcomingBanner()) ...[
+              _buildUpcomingSessionBanner(),
+              const SizedBox(height: 16),
+            ],
             Row(
               children: [
                 Expanded(
@@ -7468,10 +11065,42 @@ class _DetailScreenState extends State<DetailScreen> {
                             !bookingsAreLive
                                 ? 'Boekingen open vanaf $launchDateLabel'
                                 : (charger.available
-                                    ? 'Reserveer nu'
+                                    ? 'Reserveer tijdsblok'
                                     : 'Momenteel bezet'),
                           ),
                         ),
+                        // Task #314 subtitle: expliciete uitleg over hoe je
+                        // de laadsessie start. Boekers zonder eerdere Pluggo-
+                        // ervaring weten anders niet dat 'ie via de app moet
+                        // (smart) of dat 'ie fysiek naar de paal moet
+                        // (manueel). Kleine caption onder de CTA.
+                        if (charger.available && bookingsAreLive) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                charger.ocppChargerId != null &&
+                                        charger.ocppChargerId!.isNotEmpty
+                                    ? Icons.bolt_rounded
+                                    : Icons.power_rounded,
+                                size: 14,
+                                color: AppColors.textSecondary,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                charger.ocppChargerId != null &&
+                                        charger.ocppChargerId!.isNotEmpty
+                                    ? 'Je start je laadsessie straks in de app'
+                                    : 'Je start je laadsessie fysiek bij de paal',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
             ),
@@ -9151,8 +12780,32 @@ class _BookingScreenState extends State<BookingScreen> {
           start: _startTime!,
           end: _endTime!,
           charger: widget.charger,
-          onClose: () {
+          onClose: () async {
             Navigator.of(ctx).pop();
+            // Task #316: heeft de user net op een smart paal geboekt en
+            // nooit eerder de tutorial gezien? Chain 'm nu — de mentale
+            // context van "net iets geboekt" is precies wanneer je wilt
+            // uitleggen: kom aan → stekker erin → druk Start in de app.
+            // Fire-and-forget verkeerd hier want we willen 'm afwachten
+            // voordat we terug poppen naar het detailscherm.
+            final ocppId = widget.charger.ocppChargerId;
+            final isSmart = ocppId != null && ocppId.isNotEmpty;
+            if (isSmart && mounted) {
+              final seen = await PluggoPrefs.smartTutorialSeen();
+              if (!seen && mounted) {
+                await showDialog<void>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => const SmartBookingTutorialDialog(),
+                );
+                // Alleen markeren als de dialog daadwerkelijk klaar is —
+                // als de user 'm zou weg-swipen (barrier dismiss zit uit,
+                // maar defensive) willen we 'm bij een volgende smart
+                // booking gewoon nog een keer laten zien.
+                await PluggoPrefs.markSmartTutorialSeen();
+              }
+            }
+            if (!mounted) return;
             Navigator.of(context).pop(true); // terug naar detail
           },
         ),
@@ -9964,6 +13617,212 @@ class _BookingSuccessDialog extends StatelessWidget {
       ),
     );
   }
+}
+
+// ============================================================================
+// SmartBookingTutorialDialog — task #316
+//
+// 3-slide overlay die verschijnt na de eerste succesvolle boeking op een
+// smart (OCPP-gekoppelde) paal. Legt in korte, visuele stappen uit hoe de
+// laadsessie straks werkt zodat de user niet gaat panieken bij aankomst:
+//
+//   1. "Kom aan bij de paal"     — icoon: pin/map
+//   2. "Stekker in je auto"      — icoon: plug
+//   3. "Druk Start in de app"    — icoon: bliksem
+//
+// De user kan swipen tussen slides, en zowel [Overslaan] als [Ik snap 't]
+// sluiten de tutorial. Bewust géén "verplicht doorlopen" — dat voelt
+// betuttelend en de context (uitleg vlak na booking) is helder genoeg.
+//
+// State is buiten deze widget bijgehouden via PluggoPrefs.smartTutorialSeen
+// zodat we 'm maar één keer laten zien over de hele app-lifetime.
+// ============================================================================
+class SmartBookingTutorialDialog extends StatefulWidget {
+  const SmartBookingTutorialDialog({Key? key}) : super(key: key);
+
+  @override
+  State<SmartBookingTutorialDialog> createState() =>
+      _SmartBookingTutorialDialogState();
+}
+
+class _SmartBookingTutorialDialogState
+    extends State<SmartBookingTutorialDialog> {
+  final PageController _pc = PageController();
+  int _idx = 0;
+
+  static const _slides = [
+    _TutorialSlide(
+      icon: Icons.pin_drop_rounded,
+      title: 'Kom aan bij de paal',
+      body:
+          'Op de dag zelf krijg je 15 minuten van tevoren een reminder. Rijd rustig naar het adres — je bent er van harte welkom.',
+      accent: AppColors.primary,
+    ),
+    _TutorialSlide(
+      icon: Icons.power_rounded,
+      title: 'Stekker in je auto',
+      body:
+          'Sluit je eigen kabel aan (of gebruik de meegeleverde kabel als de eigenaar dat heeft aangegeven). De paal wacht op je startsignaal.',
+      accent: AppColors.primary,
+    ),
+    _TutorialSlide(
+      icon: Icons.bolt_rounded,
+      title: 'Druk op Start in de app',
+      body:
+          'Open Pluggo en druk op "Start laden nu" bij je boeking. Klaar — de paal begint te laden en jij ziet live hoeveel kWh erin gaat.',
+      accent: AppColors.primary,
+    ),
+  ];
+
+  @override
+  void dispose() {
+    _pc.dispose();
+    super.dispose();
+  }
+
+  void _next() {
+    if (_idx == _slides.length - 1) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _pc.nextPage(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  void _skip() => Navigator.of(context).pop();
+
+  @override
+  Widget build(BuildContext context) {
+    final last = _idx == _slides.length - 1;
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Top-row: skip-knop rechts. Alleen bij niet-laatste slide zichtbaar
+            // zodat "Ik snap 't" op de laatste pagina niet naast een dubbele
+            // exit-optie staat.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (!last)
+                  TextButton(
+                    onPressed: _skip,
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                    ),
+                    child: const Text('Overslaan'),
+                  )
+                else
+                  const SizedBox(height: 36),
+              ],
+            ),
+            SizedBox(
+              height: 300,
+              child: PageView.builder(
+                controller: _pc,
+                itemCount: _slides.length,
+                onPageChanged: (i) => setState(() => _idx = i),
+                itemBuilder: (context, i) {
+                  final s = _slides[i];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 88,
+                          height: 88,
+                          decoration: BoxDecoration(
+                            color: s.accent.withOpacity(0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(s.icon, size: 44, color: s.accent),
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          s.title,
+                          style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          s.body,
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: AppColors.textSecondary,
+                            height: 1.5,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Page-indicator dots. Simpel handmatig, geen extra dependency.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(_slides.length, (i) {
+                final active = i == _idx;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  height: 8,
+                  width: active ? 24 : 8,
+                  decoration: BoxDecoration(
+                    color: active
+                        ? AppColors.primary
+                        : AppColors.primary.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _next,
+                child: Text(last ? 'Ik snap \'t' : 'Volgende'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Value-object voor één slide. Const-lijst bovenaan
+// _SmartBookingTutorialDialogState — als je een 4e slide wilt toevoegen
+// (bijv. "Stop de sessie als je vertrekt"), voeg 'em daar toe en klaar.
+class _TutorialSlide {
+  final IconData icon;
+  final String title;
+  final String body;
+  final Color accent;
+
+  const _TutorialSlide({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.accent,
+  });
 }
 
 // ============================================
@@ -14671,26 +18530,61 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () => _enterKwhForBooking(b),
-                        icon: const Icon(Icons.edit_rounded, size: 16),
-                        label: const Text('Vul kWh in'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          textStyle: GoogleFonts.inter(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                    // Twee knoppen naast elkaar: primary "Vul kWh in" én
+                    // secondary "Geen lading" voor het no-show scenario
+                    // (#371). De verhouding 3:2 houdt de primary dominant
+                    // maar de escape-hatch zichtbaar zonder erop te hoeven
+                    // zoeken.
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: ElevatedButton.icon(
+                            onPressed: () => _enterKwhForBooking(b),
+                            icon: const Icon(Icons.edit_rounded, size: 16),
+                            label: const Text('Vul kWh in'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              textStyle: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _markNoChargeForBooking(b),
+                            icon: const Icon(Icons.block_rounded, size: 15),
+                            label: const Text('Geen lading'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.textSecondary,
+                              side: BorderSide(
+                                color: AppColors.textSecondary
+                                    .withOpacity(0.35),
+                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              textStyle: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -15172,6 +19066,337 @@ class _IncomingBookingsScreenState extends State<IncomingBookingsScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // _markNoChargeForBooking — "Geen lading gehad" flow (task #371)
+  //
+  // Scenario: boeker kwam niet opdagen of stak nooit de stekker in. Zonder
+  // deze escape blijft de "Vul kWh in"-prompt permanent staan.
+  //
+  // Flow:
+  //   1. MID-guard: check charging_sessions op deze booking_id. Als de paal
+  //      wél verbruik heeft geregistreerd (> 200 Wh drempel — zowat 1 minuut
+  //      op 12 kW), blokkeren we de flow met een uitleg. Anders zou de host
+  //      zichzelf een gratis laadbeurt kunnen geven.
+  //   2. Bevestig-sheet: uitleg + expliciete keuze.
+  //   3. Update bookings.no_charge = true (met .select() voor RLS-detectie).
+  //   4. Push + email naar de boeker met de reden.
+  //
+  // Wat we NIET doen:
+  //   - Status wijzigen naar 'cancelled': de boeking is niet geannuleerd,
+  //     'ie is voorbij en er is gewoon niks geladen. Semantisch klopt
+  //     'confirmed' + no_charge=true beter.
+  //   - Geld terugstorten: er was geen betaling, dus niks te storteren.
+  // ----------------------------------------------------------------
+  Future<void> _markNoChargeForBooking(Booking b) async {
+    // ---- Stap 1: MID-guard ----
+    // Kijk of er een charging_sessions-rij bestaat gekoppeld aan deze
+    // booking_id met noemenswaardig verbruik. Als 'ie er niet is (manuele
+    // paal zonder OCPP-koppeling): geen guard, gewoon doorgaan.
+    try {
+      final session = await supabase
+          .from('charging_sessions')
+          .select(
+              'transaction_id, meter_start_wh, meter_current_wh, meter_stop_wh, status')
+          .eq('booking_id', b.id)
+          .order('started_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (session != null) {
+        final startWh = ((session['meter_start_wh'] as num?) ?? 0).toInt();
+        final endWh = ((session['meter_stop_wh'] as num?) ??
+                (session['meter_current_wh'] as num?) ??
+                startWh)
+            .toInt();
+        final deltaWh = endWh - startWh;
+        // 200 Wh drempel: OCPP-jitter en meter-precisie zorgen dat er soms
+        // 10-50 Wh "spookverbruik" tussen start en stop zit. 200 Wh vangt
+        // dat af, maar detecteert wel elke echte laadbeurt (~1 min op 12 kW).
+        if (deltaWh > 200) {
+          if (!mounted) return;
+          final measuredKwh = (deltaWh / 1000.0)
+              .toStringAsFixed(2)
+              .replaceAll('.', ',');
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: const Text('Er is wél geladen'),
+              content: Text(
+                'De paal heeft $measuredKwh kWh geregistreerd op deze boeking. '
+                'Gebruik "Vul kWh in" en zet dat aantal in, of neem contact '
+                'op met support als je denkt dat de meting niet klopt.',
+                style: GoogleFonts.inter(fontSize: 13),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
+      }
+    } catch (_) {
+      // MID-guard is best-effort. Als de query faalt (bijv. tijdelijke
+      // netwerkfout), vertrouwen we op de bevestig-stap hierna — dat is
+      // een user-side gate. Beter doorlaten dan permanent blokkeren.
+    }
+
+    // ---- Stap 2: Bevestig-sheet ----
+    final boekerNaam = b.userName?.split(' ').first ?? 'De boeker';
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            20 + MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.textSecondary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.block_rounded,
+                      color: AppColors.textSecondary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Geen lading gehad?',
+                      style: GoogleFonts.inter(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Bevestig dat $boekerNaam niet is komen laden — of alleen '
+                'aan de paal stond zonder stroom af te nemen. We sluiten '
+                'de boeking af zonder betaalverzoek en laten $boekerNaam '
+                'weten dat er niks te betalen is.',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  height: 1.4,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7E6),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFFF0B429).withOpacity(0.3),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      size: 16,
+                      color: Color(0xFF9F6B00),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Deze actie is definitief — je kunt daarna geen '
+                        'kWh meer invullen voor deze boeking. Kies dus '
+                        'alleen als er echt niks geladen is.',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          height: 1.35,
+                          color: const Color(0xFF6E4500),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textPrimary,
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Terug'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.textPrimary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Ja, geen lading'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // ---- Stap 3: DB-update met RLS-guard ----
+    try {
+      final updated = await supabase
+          .from('bookings')
+          .update({'no_charge': true})
+          .eq('id', b.id)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception(
+          'Update werd geweigerd (0 rijen aangepast). Mogelijk ben je niet '
+          'meer eigenaar van deze paal of is de boeking ondertussen gewijzigd.',
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kon status niet opslaan: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    // ---- Stap 4: Notificatie aan boeker ----
+    // Push + email fire-and-forget. Als een van beide faalt, blokkeert
+    // dat de host niet — de DB-status is de bron van waarheid.
+    // ignore: unawaited_futures
+    PluggoPush.sendTo(
+      userId: b.userId,
+      title: 'Laadsessie afgesloten zonder kosten',
+      body: 'De eigenaar meldde dat er niks geladen is. Je hoeft niet te '
+          'betalen voor deze boeking.',
+      data: {
+        'type': 'booking_no_charge',
+        'booking_id': b.id,
+      },
+    );
+    _sendNoChargeEmail(b);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Boeking afgesloten — ${b.userName?.split(' ').first ?? 'de boeker'} krijgt bericht.',
+        ),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    _load();
+  }
+
+  // ----------------------------------------------------------------
+  // _sendNoChargeEmail — mail naar boeker dat de host de boeking als
+  // "geen lading" heeft afgesloten. Hergebruikt send-email edge function.
+  // Fire-and-forget: faalt stil, DB is de bron van waarheid.
+  // ----------------------------------------------------------------
+  Future<void> _sendNoChargeEmail(Booking b) async {
+    final to = b.userEmail;
+    if (to == null || to.isEmpty) return;
+    final chargerName = b.charger?.name ?? 'de laadpaal';
+    final boekerNaam = b.userName?.split(' ').first ?? 'daar';
+    final subject = 'Je Pluggo-boeking bij $chargerName is afgesloten';
+    final html = '''
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#F5F5F5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;padding:32px 24px;">
+    <h1 style="margin:0 0 8px;color:#00A87E;font-size:24px;">Pluggo</h1>
+    <p style="margin:0 0 24px;color:#666;font-size:14px;">Buren laden bij buren</p>
+
+    <h2 style="margin:0 0 16px;font-size:20px;color:#222;">Hoi $boekerNaam,</h2>
+
+    <p style="margin:0 0 16px;color:#444;font-size:14px;">
+      De eigenaar van <strong>$chargerName</strong> heeft je boeking
+      afgesloten omdat er geen lading heeft plaatsgevonden. Dat kan zijn omdat
+      je uiteindelijk niet bent komen laden, of omdat de stekker niet is
+      ingestoken.
+    </p>
+
+    <div style="background:#E6F7F0;border-left:4px solid #00A87E;padding:16px 20px;margin:24px 0;border-radius:6px;">
+      <p style="margin:0;color:#005C44;font-size:14px;font-weight:600;">
+        Geen betaling nodig — deze boeking kost je niks.
+      </p>
+    </div>
+
+    <p style="margin:0 0 8px;color:#444;font-size:14px;">
+      Klopt het niet, of denk je dat er iets is misgegaan? Neem dan contact
+      op met de eigenaar via de chat in de Pluggo-app, of mail
+      <a href="mailto:support@pluggoapp.nl">support@pluggoapp.nl</a>.
+    </p>
+
+    <hr style="border:none;border-top:1px solid #eee;margin:32px 0 16px;">
+    <p style="margin:0;color:#999;font-size:12px;">Je ontvangt deze mail omdat je een boeking hebt gemaakt via Pluggo.</p>
+  </div>
+</body>
+</html>
+''';
+    try {
+      await supabase.functions.invoke(
+        'send-email',
+        body: {'to': to, 'subject': subject, 'html': html},
+      );
+    } catch (e, st) {
+      debugPrint('send-email (no-charge → booker) failed: $e\n$st');
     }
   }
 

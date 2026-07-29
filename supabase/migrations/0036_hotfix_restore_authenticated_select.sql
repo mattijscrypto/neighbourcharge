@@ -1,0 +1,103 @@
+-- ============================================================================
+-- 0036_hotfix_restore_authenticated_select.sql
+--
+-- ⚠️  TIJDELIJKE HOTFIX — reverten zodra 1.3.0+14 op beide stores staat.
+--
+-- INCIDENT
+-- ----------------------------------------------------------------------------
+-- Task #241 / 0030 heeft column-level GRANTs ingevoerd zodat `authenticated`
+-- niet meer direct `lat, lng` van andermans palen kan uitlezen. De
+-- bijbehorende Flutter-refactor (`.rpc('my_chargers')` + `.select('id')`
+-- na INSERT) zit in commit 13d9198 (15 juli 2026), maar is NOOIT naar de
+-- app-stores gepushed. Beide stores draaien nog op app-versie 1.2.2+12
+-- (juli 2026) met het oude patroon:
+--
+--   supabase.from('chargers').insert({...}).select().single()
+--
+-- Onder 0030 vertaalt dat naar INSERT ... RETURNING *, wat SELECT vereist
+-- op alle kolommen — inclusief `lat, lng`, die authenticated niet meer heeft.
+-- Resultaat: PostgrestException 42501 "permission denied for table chargers"
+-- voor iedere gebruiker die een paal probeert toe te voegen sinds 0030 in
+-- productie kwam (~15 juli). Rob D. voegde op 15 juli nog succesvol toe
+-- (vóór deploy), Philip R. is de eerste bevestigde failure (19 juli).
+--
+-- STRATEGIE
+-- ----------------------------------------------------------------------------
+-- Server-side pad. Alternatief was een store-hotfix (nieuwe app-build met
+-- alleen de INSERT-refactor uit 13d9198), maar dat duurt 24-48u voor iOS
+-- review en laat de bug in tussentijd staan. Deze migratie herstelt SELECT
+-- voor `authenticated` op tabel-niveau, waardoor RETURNING * weer werkt.
+--
+-- Wat we terugkrijgen:
+--   • Table-level SELECT voor `authenticated` op public.chargers
+--   • INSERT ... RETURNING * (`.select().single()`) werkt weer
+--   • `.from('chargers').select(...)` in oude code-paden werkt weer
+--
+-- Wat we bewust laten staan uit 0030:
+--   • `my_chargers()` SECURITY DEFINER helper (blijft nuttig)
+--   • Column-level grants voor `anon` (publieke kaart-kant ongewijzigd)
+--   • RLS-policies (`chargers_owner_all` + `chargers_select_for_public_view`)
+--
+-- SECURITY REGRESSIE (bewust, tijdelijk)
+-- ----------------------------------------------------------------------------
+-- Deze hotfix brengt de #188-vulnerability terug voor `authenticated`:
+-- ingelogde users kunnen weer via een directe query
+--   `select lat, lng from chargers where id = '<uuid>'`
+-- de exacte huisadres-coords van andermans palen ophalen. `anon` blijft
+-- geblokkeerd (column-grants intact). Fuzzy coords via `chargers_public`
+-- blijven wel de standaard-weg voor de kaart.
+--
+-- Rationale om dit tijdelijk te accepteren:
+--   1. Volledig paal-add outage voor álle huidige gebruikers is erger.
+--   2. Exploit vereist een geldig authenticated JWT + kennis van paal-UUID.
+--   3. Venster: hooguit 1-2 weken tot v1.3.0+14 op beide stores staat.
+--   4. Geen credential/PII-lek — alleen coords die op de publieke kaart al
+--      als fuzzy circles zichtbaar zijn (echte adres is +/- ~150m).
+--
+-- REMOVAL PLAN — cross-ref task #349 (min-app-version enforcement)
+-- ----------------------------------------------------------------------------
+-- Zodra alle actieve installs op 1.3.0+14 of hoger draaien (te controleren
+-- via Play Console → Statistics → Users by app version + App Store Connect
+-- → Analytics → App Version), maken we `0037_revoke_authenticated_select.sql`
+-- die deze hotfix terugdraait:
+--
+--   revoke select on public.chargers from authenticated;
+--
+-- De column-level grants uit 0030 blijven dan bestaan zoals bedoeld.
+--
+-- Voorwaarde vóór revoke: min-app-version force-update (task #349) moet
+-- live zijn, anders zetten we oude installs alsnog aan de kant.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- Restore table-level SELECT voor `authenticated`.
+--
+-- Note: `anon` krijgt bewust géén table-level SELECT terug. Anon draait
+-- alleen via `chargers_public` (fuzzy coords) — dat werkt via de
+-- column-level grants uit 0030 + `security_invoker = true`. De publieke
+-- kaart voor niet-ingelogde bezoekers blijft dus geblokkeerd op `lat, lng`.
+-- ---------------------------------------------------------------------------
+grant select on public.chargers to authenticated;
+
+comment on table public.chargers is
+  'TIJDELIJK: table-level SELECT voor authenticated hersteld via 0036 om paal-add-flow werkend te houden op app 1.2.2+12. Revoke via 0037 zodra v1.3.0+14 op beide stores + min-app-version enforcement (task #349) live is. Zie 0036_hotfix_restore_authenticated_select.sql voor details.';
+
+-- ============================================================================
+-- VERIFICATIE (direct na deploy)
+-- ----------------------------------------------------------------------------
+--   1. Check grant:
+--        select grantee, privilege_type from information_schema.role_table_grants
+--        where table_schema='public' and table_name='chargers'
+--          and grantee in ('anon','authenticated') and privilege_type='SELECT';
+--      → Verwacht: één rij: (authenticated, SELECT). Geen anon.
+--
+--   2. Test in de app (nieuwe test-account op productie):
+--      → Paal toevoegen via AddChargerScreen. Succes = fix bevestigd.
+--
+--   3. Test dat public-kaart blijft werken:
+--      → Log uit → open kaart → palen zichtbaar met fuzzy coords.
+--
+-- ROLLBACK
+-- ----------------------------------------------------------------------------
+--   revoke select on public.chargers from authenticated;
+-- ============================================================================

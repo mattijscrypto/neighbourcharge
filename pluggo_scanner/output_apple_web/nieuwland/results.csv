@@ -1,0 +1,6 @@
+adres,expected,lat,lng,status,heeft_laadpaal,confidence,signalen,ev_merk,notitie,n_photos,labels
+"Alpensalamander 4, Amersfoort",,52.1993115,5.3678979,OK,True,0.95,"B1: kabelgoot rechts,F1: wallbox op zijgevel",,"Wallbox en kabelgoot aan de zijgevel, duidelijk aanwezig.",3,"B1,base,F1"
+"Alpensalamander 6, Amersfoort",,52.1993138,5.3682014,OK,True,0.95,"B1: kabelgoot rechts,F1: wallbox op zijgevel",,"Wallbox en kabelgoot aan de zijgevel, duidelijk aanwezig.",3,"B1,base,F1"
+"Alpensalamander 8, Amersfoort",,52.1993156,5.3683082,OK,True,0.95,"B1: kabelgoot rechts,F1: wallbox op zijgevel",,"Wallbox en kabelgoot aan de zijgevel, duidelijke infrastructurele evidentie.",3,"B1,base,F1"
+"Anna Boelensgaarde 1, Amersfoort",,52.1980034,5.3739024,OK,True,0.95,"B1: kabelgoot rechts,F1: wallbox op zijgevel",,"Wallbox en kabelgoot aan de zijgevel, duidelijk aanwezig.",3,"B1,base,F1"
+"Anna Boelensgaarde 2, Amersfoort",,52.1980644,5.3739674,OK,True,0.95,"B1: kabelgoot rechts,F1: laadkabel in gebruik",,"Kabelgoot en laadkabel aanwezig, waarschijnlijk EV-lading.",3,"B1,base,F1"

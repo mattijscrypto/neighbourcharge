@@ -38,6 +38,23 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Deep link: pluggo:// scheme voor externe redirects terug naar de app.
+                 Wordt gebruikt door:
+                   • Stripe Connect onboarding return_url
+                     (pluggo://onboarding/stripe-complete, /stripe-refresh)
+                   • Supabase Auth email-bevestiging callback
+                     (pluggo://auth/callback?token=...)
+                 iOS-equivalent staat in ios/Runner/Info.plist (CFBundleURLSchemes).
+                 BROWSABLE category is nodig zodat browsers (Chrome, Safari)
+                 de link mogen volgen. DEFAULT zorgt dat geen "kies een app"-dialog
+                 verschijnt als pluggo de enige handler is. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="pluggo"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

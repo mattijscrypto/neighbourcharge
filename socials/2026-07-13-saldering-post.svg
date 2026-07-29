@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFE082"/>
+      <stop offset="45%" stop-color="#FFCC80"/>
+      <stop offset="100%" stop-color="#B3E5FC"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#81C784"/>
+      <stop offset="100%" stop-color="#4CAF50"/>
+    </linearGradient>
+    <linearGradient id="panelGlare" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1A237E"/>
+      <stop offset="50%" stop-color="#283593"/>
+      <stop offset="100%" stop-color="#0D47A1"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#FDD835"/>
+      <stop offset="50%" stop-color="#7CB342"/>
+      <stop offset="100%" stop-color="#2E7D32"/>
+    </linearGradient>
+    <radialGradient id="sunGrad" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#FFF176"/>
+      <stop offset="60%" stop-color="#FFC107"/>
+      <stop offset="100%" stop-color="#FF9800" stop-opacity="0.4"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+      <feOffset dx="0" dy="4"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- Clip to roof triangle so grid stays on the roof only -->
+    <clipPath id="roofClip">
+      <polygon points="110,540 490,540 300,380"/>
+    </clipPath>
+  </defs>
+
+  <!-- Sky background -->
+  <rect width="1080" height="820" fill="url(#sky)"/>
+  <!-- Ground -->
+  <rect y="820" width="1080" height="260" fill="url(#ground)"/>
+
+  <!-- Sun -->
+  <circle cx="880" cy="200" r="130" fill="url(#sunGrad)" filter="url(#soft)"/>
+  <circle cx="880" cy="200" r="80" fill="#FFEB3B"/>
+  <g stroke="#FFB300" stroke-width="10" stroke-linecap="round" opacity="0.85">
+    <line x1="880" y1="40" x2="880" y2="90"/>
+    <line x1="880" y1="310" x2="880" y2="360"/>
+    <line x1="720" y1="200" x2="770" y2="200"/>
+    <line x1="990" y1="200" x2="1040" y2="200"/>
+    <line x1="768" y1="88" x2="803" y2="123"/>
+    <line x1="957" y1="277" x2="992" y2="312"/>
+    <line x1="992" y1="88" x2="957" y2="123"/>
+    <line x1="803" y1="277" x2="768" y2="312"/>
+  </g>
+
+  <!-- HOUSE -->
+  <!-- House body -->
+  <rect x="130" y="540" width="340" height="280" fill="#FFFFFF" stroke="#37474F" stroke-width="4" filter="url(#drop)"/>
+  <!-- Roof AS solar panel (dark navy) -->
+  <polygon points="110,540 490,540 300,380" fill="url(#panelGlare)" stroke="#0D47A1" stroke-width="4" filter="url(#drop)"/>
+  <!-- Solar panel grid — coordinates trimmed to stay inside roof triangle -->
+  <g stroke="#5C6BC0" stroke-width="2" opacity="0.9">
+    <!-- Vertical divide at apex -->
+    <line x1="300" y1="380" x2="300" y2="540"/>
+    <!-- Horizontal grid lines (trimmed to triangle edges) -->
+    <line x1="252" y1="420" x2="348" y2="420"/>
+    <line x1="205" y1="460" x2="395" y2="460"/>
+    <line x1="158" y1="500" x2="443" y2="500"/>
+    <!-- Left pitch cross-lines (trimmed to left slope) -->
+    <line x1="180" y1="510" x2="180" y2="540"/>
+    <line x1="240" y1="470" x2="240" y2="540"/>
+    <!-- Right pitch cross-lines (trimmed to right slope) -->
+    <line x1="360" y1="430" x2="360" y2="540"/>
+    <line x1="420" y1="483" x2="420" y2="540"/>
+  </g>
+  <!-- Panel glare highlight -->
+  <polygon points="180,540 220,540 300,420 300,380" fill="#FFFFFF" opacity="0.12"/>
+
+  <!-- Door -->
+  <rect x="270" y="700" width="60" height="120" fill="#5D4037"/>
+  <circle cx="320" cy="762" r="3" fill="#FFC107"/>
+  <!-- Windows -->
+  <rect x="170" y="600" width="70" height="70" fill="#B3E5FC" stroke="#37474F" stroke-width="3"/>
+  <line x1="205" y1="600" x2="205" y2="670" stroke="#37474F" stroke-width="3"/>
+  <line x1="170" y1="635" x2="240" y2="635" stroke="#37474F" stroke-width="3"/>
+  <rect x="360" y="600" width="70" height="70" fill="#B3E5FC" stroke="#37474F" stroke-width="3"/>
+  <line x1="395" y1="600" x2="395" y2="670" stroke="#37474F" stroke-width="3"/>
+  <line x1="360" y1="635" x2="430" y2="635" stroke="#37474F" stroke-width="3"/>
+
+  <!-- ENERGY FLOW - curved arrow from panels to charger -->
+  <path d="M 470 430 Q 640 340 780 560" fill="none" stroke="url(#flow)" stroke-width="18" stroke-linecap="round"/>
+  <!-- Lightning bolt on flow -->
+  <g transform="translate(625,380)">
+    <polygon points="0,-38 -22,8 -5,8 -12,38 18,-8 0,-8 12,-38" fill="#FDD835" stroke="#F57F17" stroke-width="3" filter="url(#drop)"/>
+  </g>
+
+  <!-- CHARGER + EV -->
+  <!-- Charging station pole -->
+  <rect x="770" y="600" width="46" height="220" fill="#455A64" stroke="#263238" stroke-width="3"/>
+  <rect x="748" y="560" width="90" height="105" rx="10" fill="#00C853" stroke="#1B5E20" stroke-width="4" filter="url(#drop)"/>
+  <!-- Charger screen -->
+  <rect x="760" y="577" width="66" height="42" rx="4" fill="#0A2E10"/>
+  <text x="793" y="608" font-family="Arial Black, Arial, sans-serif" font-size="24" font-weight="900" fill="#7CFF9A" text-anchor="middle">37¢</text>
+  <!-- Small charging icon -->
+  <polygon points="793,628 785,644 792,644 789,656 800,640 793,640 796,628" fill="#FFEB3B" stroke="#F57F17" stroke-width="1"/>
+
+  <!-- Charging cable (curved) -->
+  <path d="M 815 665 Q 875 720 900 760" fill="none" stroke="#00C853" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- EV Car -->
+  <g transform="translate(950,780)" filter="url(#drop)">
+    <!-- Car body -->
+    <path d="M -140,0 Q -140,-40 -100,-45 L -70,-70 Q -60,-80 -40,-80 L 40,-80 Q 60,-80 70,-70 L 100,-45 Q 140,-40 140,0 L 140,20 L -140,20 Z" fill="#37474F" stroke="#263238" stroke-width="3"/>
+    <!-- Windows -->
+    <path d="M -95,-45 L -65,-70 L 65,-70 L 95,-45 Z" fill="#B3E5FC" stroke="#263238" stroke-width="2"/>
+    <line x1="0" y1="-70" x2="0" y2="-45" stroke="#263238" stroke-width="2"/>
+    <!-- Wheels -->
+    <circle cx="-80" cy="25" r="30" fill="#212121"/>
+    <circle cx="-80" cy="25" r="14" fill="#616161"/>
+    <circle cx="80" cy="25" r="30" fill="#212121"/>
+    <circle cx="80" cy="25" r="14" fill="#616161"/>
+    <!-- Charge port on side -->
+    <rect x="-55" y="-25" width="16" height="16" rx="2" fill="#00C853" stroke="#1B5E20" stroke-width="2"/>
+  </g>
+
+  <!-- Callout badge €1.900/jaar -->
+  <g transform="translate(200,180)" filter="url(#drop)">
+    <ellipse cx="0" cy="0" rx="140" ry="80" fill="#FFFFFF" stroke="#1B5E20" stroke-width="5"/>
+    <text x="0" y="-14" font-family="Arial Black, Arial, sans-serif" font-size="34" font-weight="900" fill="#1B5E20" text-anchor="middle">tot</text>
+    <text x="0" y="30" font-family="Arial Black, Arial, sans-serif" font-size="52" font-weight="900" fill="#1B5E20" text-anchor="middle">€1.900/jr</text>
+  </g>
+
+  <!-- Slogan bar -->
+  <rect x="0" y="880" width="1080" height="200" fill="#1B5E20"/>
+  <text x="540" y="955" font-family="Arial Black, Arial, sans-serif" font-size="64" font-weight="900" fill="#FFFFFF" text-anchor="middle">Zon op je dak.</text>
+  <text x="540" y="1030" font-family="Arial Black, Arial, sans-serif" font-size="64" font-weight="900" fill="#FFEB3B" text-anchor="middle">Geld op je rekening.</text>
+
+  <!-- Pluggo wordmark top-right corner (below sun) -->
+  <g transform="translate(770,80)" filter="url(#drop)">
+    <rect x="0" y="0" width="250" height="80" rx="40" fill="#1B5E20"/>
+    <circle cx="45" cy="40" r="22" fill="#FFEB3B"/>
+    <polygon points="47,26 37,44 45,44 42,54 53,38 45,38 48,26" fill="#F57F17"/>
+    <text x="155" y="53" font-family="Arial Black, Arial, sans-serif" font-size="38" font-weight="900" fill="#FFFFFF" text-anchor="middle">pluggo</text>
+  </g>
+</svg>

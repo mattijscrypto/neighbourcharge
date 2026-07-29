@@ -1,0 +1,6 @@
+adres,expected,lat,lng,status,heeft_laadpaal,confidence,signalen,ev_merk,notitie,n_photos,labels
+"Straat van Gibraltar 32, Amersfoort",True,52.1900117,5.4158138,OK,False,0.1,kabelgoot langs gevel naar oprit,,"Kabelgoot aanwezig, maar geen duidelijke wallbox of laadpaal opgevonden.",1,base
+"Straat van Gibraltar 28, Amersfoort",True,52.1899733,5.4155232,OK,False,0.1,EV geparkeerd,null,"Tesla auto op oprit, maar geen duidelijke laadinfra aanwezig.",1,base
+"Straat van Gibraltar 26, Amersfoort",True,52.189969,5.415382,OK,False,0.1,EV geparkeerd,null,"Tesla of ID3/4/7 mogelijk, maar geen wallbox of laadpaal zichtbaar.",1,base
+"Straat van Gibraltar 12, Amersfoort",True,52.1899615,5.4149964,OK,False,0.35,,,Geen duidelijke laadinfra aanwezig op voorkant of zijgevels.,1,base
+"Straat van Gibraltar 170, Amersfoort",True,52.1904995,5.4235458,OK,False,0.1,,,"Geen duidelijke laadinfra opgepikt, geen EV-merk zichtbaar.",1,base

@@ -108,20 +108,16 @@ function base64UrlEncode(buf: ArrayBuffer | Uint8Array | string): string {
 
 async function getAccessToken(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  // DEBUG: cache tijdelijk uitgezet — altijd fresh token ophalen
-  // if (cachedAccessToken && cachedAccessToken.expiresAt > now + 60) {
-  //   return cachedAccessToken.token;
-  // }
+  if (cachedAccessToken && cachedAccessToken.expiresAt > now + 60) {
+    return cachedAccessToken.token;
+  }
 
   const sa = getServiceAccount();
-  console.log("[send-push] getAccessToken: project_id =", sa.project_id, "client_email =", sa.client_email);
 
   const header = { alg: "RS256", typ: "JWT" };
   const claim = {
     iss: sa.client_email,
-    // DEBUG: terug naar canonieke FCM scope. cloud-platform gaf 401 op FCM
-    // terwijl tokeninfo zei dat de token geldig was. firebase.messaging is
-    // de scope die Google zelf aanbeveelt voor FCM HTTP v1.
+    // FCM HTTP v1 vereist deze specifieke scope (niet cloud-platform).
     scope: "https://www.googleapis.com/auth/firebase.messaging",
     aud: "https://oauth2.googleapis.com/token",
     exp: now + 3600,
@@ -154,27 +150,6 @@ async function getAccessToken(): Promise<string> {
   }
   const json = await resp.json();
   const token = json.access_token;
-  console.log(
-    "[send-push] OAuth2 token exchange OK — token length:",
-    token?.length ?? 0,
-    "prefix:",
-    token ? token.slice(0, 20) + "..." : "(empty!)",
-    "expires_in:",
-    json.expires_in,
-    "scope in response:",
-    json.scope,
-  );
-
-  // DEBUG: verifieer token via Google's tokeninfo endpoint
-  try {
-    const tiResp = await fetch(
-      `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`,
-    );
-    const tiText = await tiResp.text();
-    console.log("[send-push] tokeninfo status:", tiResp.status, "body:", tiText);
-  } catch (e) {
-    console.error("[send-push] tokeninfo call faalde:", e);
-  }
 
   cachedAccessToken = {
     token,
@@ -214,35 +189,48 @@ async function sendToToken(
     }
     message.data = stringData;
   }
-  // iOS-specifiek: zet category/sound voor nette presentatie.
-  message.apns = {
-    payload: {
-      aps: {
-        sound: "default",
-        "mutable-content": 1,
-      },
-    },
+
+  // -------------------------------------------------------------------------
+  // iOS-payload
+  //
+  // We voegen ALTIJD apns.payload.aps.sound + mutable-content toe voor nette
+  // presentatie. Als de caller een `data.category` meestuurt (zoals de
+  // BOOKING_ENDING_SOON warning uit migration 0029 doet), forwarden we die
+  // naar apns.payload.aps.category — dat matcht dan een UNNotificationCategory
+  // die client-side is geregistreerd in AppDelegate.swift, waardoor de
+  // system-notification action-buttons toont op het lockscreen.
+  //
+  // Zonder client-side registratie: apns negeert een onbekende category en
+  // toont de notification zonder actions — dus safe fallback.
+  // -------------------------------------------------------------------------
+  const aps: Record<string, unknown> = {
+    sound: "default",
+    "mutable-content": 1,
   };
+  if (data && typeof data.category === "string" && data.category.length > 0) {
+    aps.category = data.category;
+  }
+  message.apns = { payload: { aps } };
+
+  // -------------------------------------------------------------------------
+  // Android-payload
+  //
+  // TODO(#292 fase 2): rijke Android-notification met action buttons via
+  // flutter_local_notifications. Voor nu geen extra Android-block — de
+  // standaard FCM notification wordt door het OS gerenderd zonder actions.
+  // De gebruiker ziet dan wel de push maar tikt hem open i.p.v. rechtstreeks
+  // een verleng-optie te kiezen. Zodra fase 2 er is, sturen we voor
+  // Android een data-only bericht en bouwt de client de rijke notification.
+  // -------------------------------------------------------------------------
 
   const url =
     `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
-  console.log(
-    "[send-push] FCM POST:",
-    url,
-    "| token prefix:",
-    accessToken ? accessToken.slice(0, 20) + "..." : "(empty!)",
-    "| token length:",
-    accessToken?.length ?? 0,
-  );
+
   const resp = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      // DEBUG: sommige Google Cloud APIs geven 401 "missing credential" terug
-      // als deze header ontbreekt, ook bij geldige Bearer token. Attribueert
-      // de request expliciet aan ons project voor quota/billing.
-      "x-goog-user-project": projectId,
     },
     body: JSON.stringify({ message }),
   });
@@ -258,7 +246,7 @@ async function sendToToken(
   return {
     ok: false,
     removeToken: isDead,
-    error: `${resp.status} ${txt.slice(0, 200)}`,
+    error: `${resp.status} ${txt.slice(0, 500)}`,
   };
 }
 

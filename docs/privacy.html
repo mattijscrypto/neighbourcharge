@@ -120,7 +120,7 @@
     </a>
 
     <h1>Privacybeleid</h1>
-    <p class="updated">Laatst bijgewerkt: 28 mei 2026</p>
+    <p class="updated">Laatst bijgewerkt: 23 juli 2026</p>
 
     <div class="intro">
       <p>Pluggo is een platform waarop buurtbewoners hun private laadpaal delen met andere EV-rijders. Om dit mogelijk te maken verwerken we een beperkte hoeveelheid persoonsgegevens. Deze pagina legt uit welke gegevens we verzamelen, waarom, en welke rechten je hebt.</p>
@@ -138,6 +138,7 @@
       <li><strong>Boekingsgegevens:</strong> datum, tijdvak, en een optionele berichttekst bij een boeking.</li>
       <li><strong>Fiscale en zakelijke gegevens (bij aanbieders):</strong> BTW-status (zakelijk óf particulier met KOR-registratie), en bij zakelijke aanbieders aanvullend KvK-nummer en BTW-identificatienummer. Pluggo gebruikt deze gegevens uitsluitend om correcte facturen op te stellen namens jou (zie §4 van de algemene voorwaarden, self-billing) en geeft ze door aan Stripe voor de wettelijke KYC-procedure.</li>
       <li><strong>Identificatiegegevens voor Stripe (bij aanbieders):</strong> naam, geboortedatum, adres en IBAN. Deze gegevens worden via de app rechtstreeks doorgegeven aan Stripe voor het openen en onderhouden van een Stripe Connect Express account; Pluggo bewaart een minimum aan referentiedata (zoals het Stripe-account-ID en de status van de KYC-controle) in de eigen database.</li>
+      <li><strong>Fiscaal identificatienummer — BSN of RSIN (bij aanbieders, bij nadering DAC7-drempel):</strong> wanneer je als aanbieder in een kalenderjaar 30 of meer boekingen realiseert óf €&nbsp;2.000 of meer aan uitbetalingen ontvangt, zijn wij wettelijk verplicht je Burgerservicenummer (BSN, particulieren) of RSIN (ondernemers) te verzamelen. Dit nummer wordt versleuteld opgeslagen (AES-256) en nooit in zijn geheel getoond in de app. Zie ook §&nbsp;12 hieronder.</li>
     </ul>
 
     <h3>Gegevens die automatisch worden verzameld</h3>
@@ -153,6 +154,7 @@
       <li>Om e-mailnotificaties te sturen naar eigenaren van palen zodra er een boeking binnenkomt.</li>
       <li>Om fraude, misbruik en spam tegen te gaan.</li>
       <li>Om de dienst te verbeteren op basis van geanonimiseerd gebruiksinzicht.</li>
+      <li>Om te voldoen aan onze wettelijke rapportageplicht onder de DAC7-richtlijn (EU 2021/514): jaarlijkse aangifte bij de Belastingdienst van uitbetalingen aan aanbieders die de drempel van 30 transacties of €&nbsp;2.000 bereiken.</li>
     </ul>
 
     <h2>4. Rechtsgrondslag</h2>
@@ -161,6 +163,7 @@
       <li><strong>Uitvoering van de overeenkomst:</strong> voor het leveren van de Pluggo-dienst zodra je een account aanmaakt.</li>
       <li><strong>Toestemming:</strong> voor toegang tot je locatie en camera/fotobibliotheek — je kunt deze toestemming intrekken via de instellingen van je telefoon.</li>
       <li><strong>Gerechtvaardigd belang:</strong> voor beveiliging, fraudepreventie en productverbetering.</li>
+      <li><strong>Wettelijke verplichting:</strong> voor de verwerking van BSN/RSIN en de jaarlijkse rapportage aan de Belastingdienst op grond van art. 10c AWR, de Uitvoeringsregeling WIB art. 8, en EU-richtlijn 2021/514 (DAC7).</li>
     </ul>
 
     <h2>5. Met wie we gegevens delen</h2>
@@ -171,6 +174,7 @@
       <li><strong>Resend</strong> — verzending van transactionele e-mails (bijv. boekingsnotificaties en factuur-bijlages).</li>
       <li><strong>Google Maps</strong> — voor het tonen van de kaart. Google verwerkt hierbij technische gegevens zoals je IP-adres.</li>
       <li><strong>Apple / Google</strong> — de respectievelijke app stores waar de app wordt gedistribueerd en (voor pushmeldingen) verzonden worden via APNs/FCM.</li>
+      <li><strong>Belastingdienst (Nederland)</strong> — op basis van de DAC7-richtlijn zijn wij verplicht jaarlijks gegevens te rapporteren van aanbieders die de wettelijke drempel bereiken. Deze rapportage bevat: naam, adres, BSN/RSIN, IBAN en de per kwartaal gerealiseerde inkomsten. Pluggo deelt uitsluitend de wettelijk vereiste velden en alleen wanneer de drempel daadwerkelijk is bereikt.</li>
     </ul>
     <p>Andere Pluggo-gebruikers zien van jou alleen wat nodig is om een boeking uit te voeren: bij aanbieders de paalgegevens en adres, en bij boekers je naam en berichttekst — uitsluitend zichtbaar voor de eigenaar van de geboekte paal.</p>
 
@@ -179,8 +183,9 @@
       <li>Accountgegevens: zolang je account actief is.</li>
       <li>Laadpaal- en boekingsgegevens: zolang het account van de eigenaar / boeker bestaat.</li>
       <li>Technische logs: maximaal 30 dagen.</li>
+      <li>Fiscale gegevens (BSN/RSIN, transactieoverzichten voor DAC7): <strong>10 jaar</strong> na het einde van het kalenderjaar waarop de rapportage betrekking heeft — conform de fiscale bewaarplicht (art. 52 AWR). Deze gegevens kunnen niet worden gewist zolang de rapportagetermijn loopt, ook niet bij accountverwijdering.</li>
     </ul>
-    <p>Wanneer je je account verwijdert via de app, worden al je persoonsgegevens, palen, boekingen en geüploade foto's onmiddellijk verwijderd.</p>
+    <p>Wanneer je je account verwijdert via de app, worden al je persoonsgegevens, palen, boekingen en geüploade foto's onmiddellijk verwijderd — met uitzondering van fiscale gegevens waarvoor een wettelijke bewaarplicht geldt (zie hierboven).</p>
 
     <h2>7. Jouw rechten (AVG)</h2>
     <p>Je hebt het recht om:</p>
@@ -205,6 +210,18 @@
 
     <h2>11. Contact</h2>
     <p>Vragen? Mail gerust naar <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a>.</p>
+
+    <h2>12. Belastingrapportage (DAC7)</h2>
+    <p>Pluggo valt als digitaal platform onder de meldingsplicht van EU-richtlijn 2021/514 (DAC7), geïmplementeerd in Nederland via art. 10c AWR en de Uitvoeringsregeling WIB. Dit betekent het volgende voor aanbieders:</p>
+    <ul>
+      <li><strong>Wanneer van toepassing:</strong> wanneer je in een kalenderjaar 30 of meer voltooide boekingen realiseert <em>of</em> €&nbsp;2.000 of meer aan uitbetalingen ontvangt via Pluggo, zijn wij verplicht jouw gegevens te melden bij de Belastingdienst.</li>
+      <li><strong>Welke gegevens worden gemeld:</strong> naam, adres, geboortedatum, BSN (particulieren) of RSIN (ondernemers), IBAN en de per kwartaal gerealiseerde vergoedingen.</li>
+      <li><strong>Grondslag voor BSN/RSIN-verzameling:</strong> wettelijke verplichting (art. 10c AWR). Je bent verplicht dit nummer te verstrekken zodra de drempel wordt benaderd; Pluggo kan anders de wettelijk verplichte rapportage niet uitvoeren.</li>
+      <li><strong>Beveiliging:</strong> je BSN/RSIN wordt versleuteld opgeslagen (AES-256) en nooit in zijn geheel getoond in de app — alleen de laatste vier cijfers zijn zichtbaar als bevestiging.</li>
+      <li><strong>Bewaartermijn:</strong> 10 jaar na het einde van het rapportagejaar (fiscale bewaarplicht art. 52 AWR).</li>
+      <li><strong>Jouw rechten:</strong> je hebt recht op inzage en correctie van je BSN/RSIN. Verwijdering is niet mogelijk zolang de rapportageplicht geldt. Stuur verzoeken naar <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a>.</li>
+      <li><strong>Kennisgeving:</strong> wij sturen je een in-app notificatie zodra wij jouw gegevens voor het eerst aan de Belastingdienst rapporteren, conform art. 10c lid 4 AWR.</li>
+    </ul>
 
     <footer>
       <p>© 2026 Pluggo · <a href="./terms.html">Algemene voorwaarden</a> · <a href="./privacy.html">Privacybeleid</a></p>

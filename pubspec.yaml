@@ -2,7 +2,7 @@ name: neighbourcharge
 description: A new Flutter project for NeighbourCharge.
 publish_to: 'none'
 
-version: 1.1.0+8
+version: 1.2.3+13
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -31,6 +31,12 @@ dependencies:
   # app_links handelt deep links af zoals pluggo://onboarding/stripe-complete
   # — Stripe-hosted KYC redirect hier naartoe na onboarding.
   app_links: ^6.3.2
+  # SharedPreferences voor lichte lokale flags: has-seen-smart-tutorial (#316),
+  # has-seen-welcome-onboarding (#317), etc. Bewust géén server-side flag
+  # want deze one-shots hoeven niet over devices te syncen — als je de app
+  # op een nieuw device installeert is een korte herhaling van de uitleg
+  # juist prettig. Vervangt geen auth/persistente state.
+  shared_preferences: ^2.2.2
 
 dev_dependencies:
   flutter_test:

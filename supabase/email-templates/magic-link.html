@@ -1,0 +1,107 @@
+<!--
+  Pluggo — Auth email template: magic link login
+  ----------------------------------------------------------------------------
+  Waar te plakken:
+    Supabase Dashboard → Authentication → Email Templates → "Magic Link"
+    Onderwerp: Log in bij Pluggo
+  ----------------------------------------------------------------------------
+-->
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Log in bij Pluggo</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F5F7F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1F2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5F7F5;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background-color:#FFFFFF;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+
+          <tr>
+            <td align="center" style="padding:36px 24px 8px 24px;">
+              <div style="display:inline-block;width:56px;height:56px;background-color:#00A87E;border-radius:14px;line-height:56px;font-size:28px;font-weight:700;color:#FFFFFF;letter-spacing:-0.5px;">P</div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:4px 24px 0 24px;">
+              <div style="font-size:14px;font-weight:600;color:#00A87E;letter-spacing:1px;text-transform:uppercase;">Pluggo</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:24px 32px 8px 32px;">
+              <h1 style="margin:0;font-size:24px;line-height:32px;font-weight:700;color:#111827;">Log in bij Pluggo</h1>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:16px 32px 8px 32px;">
+              <p style="margin:0 0 16px 0;font-size:16px;line-height:24px;color:#374151;">
+                Klik op de knop hieronder om in te loggen. Geen wachtwoord nodig — deze link doet 't voor je.
+              </p>
+              <p style="margin:0 0 16px 0;font-size:16px;line-height:24px;color:#374151;">
+                Deze link is 1 uur geldig en werkt maar één keer.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:16px 32px 8px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" bgcolor="#00A87E" style="border-radius:10px;">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:10px;">Inloggen</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:16px 32px 8px 32px;">
+              <p style="margin:0 0 8px 0;font-size:13px;line-height:20px;color:#6B7280;">
+                Knop werkt niet? Kopieer en plak deze link in je browser:
+              </p>
+              <p style="margin:0;font-size:13px;line-height:20px;color:#00A87E;word-break:break-all;">
+                <a href="{{ .ConfirmationURL }}" style="color:#00A87E;text-decoration:none;">{{ .ConfirmationURL }}</a>
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <div style="border-top:1px solid #E5E7EB;"></div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 32px 32px 32px;">
+              <p style="margin:0 0 8px 0;font-size:13px;line-height:20px;color:#6B7280;">
+                Heb je geen login-verzoek gedaan? Dan kun je deze e-mail negeren.
+              </p>
+              <p style="margin:0;font-size:13px;line-height:20px;color:#6B7280;">
+                Vragen? Mail ons op <a href="mailto:info@pluggoapp.nl" style="color:#00A87E;text-decoration:none;">info@pluggoapp.nl</a>.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+          <tr>
+            <td align="center" style="padding:20px 16px 0 16px;">
+              <p style="margin:0;font-size:12px;line-height:18px;color:#9CA3AF;">
+                Pluggo — het peer-to-peer laadnetwerk van Nederland<br />
+                <a href="https://pluggoapp.nl" style="color:#9CA3AF;text-decoration:underline;">pluggoapp.nl</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

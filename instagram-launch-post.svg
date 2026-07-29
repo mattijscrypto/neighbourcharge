@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <!-- Achtergrond -->
+  <rect width="1080" height="1080" fill="#FFFFFF"/>
+
+  <!-- Subtiele groene accent-band linksboven -->
+  <rect x="0" y="0" width="1080" height="8" fill="#00A87E"/>
+
+  <!-- Bliksem-icoontje boven de tekst, in het groen -->
+  <g transform="translate(540, 300)">
+    <path d="M -22 -60 L 14 -60 L -4 -6 L 26 -6 L -18 60 L -2 6 L -30 6 Z"
+          fill="#00A87E"/>
+  </g>
+
+  <!-- "Vanaf vandaag:" -->
+  <text x="540" y="520"
+        text-anchor="middle"
+        font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+        font-size="72"
+        font-weight="500"
+        fill="#333333"
+        letter-spacing="-1">
+    Vanaf vandaag:
+  </text>
+
+  <!-- Hoofdregel: "buren laden bij buren." -->
+  <text x="540" y="650"
+        text-anchor="middle"
+        font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+        font-size="96"
+        font-weight="700"
+        fill="#00A87E"
+        letter-spacing="-2">
+    buren laden
+  </text>
+  <text x="540" y="770"
+        text-anchor="middle"
+        font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+        font-size="96"
+        font-weight="700"
+        fill="#00A87E"
+        letter-spacing="-2">
+    bij buren.
+  </text>
+
+  <!-- Wordmerk onderaan -->
+  <g transform="translate(540, 970)">
+    <!-- Klein bliksempje voor Pluggo -->
+    <path d="M -95 -14 L -83 -14 L -89 -2 L -79 -2 L -95 22 L -89 4 L -99 4 Z"
+          fill="#00A87E"/>
+    <text x="-70" y="10"
+          text-anchor="start"
+          font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+          font-size="52"
+          font-weight="800"
+          fill="#00A87E"
+          letter-spacing="-1">
+      Pluggo
+    </text>
+  </g>
+
+  <!-- Kleine tagline onder wordmerk -->
+  <text x="540" y="1030"
+        text-anchor="middle"
+        font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+        font-size="26"
+        font-weight="400"
+        fill="#666666"
+        letter-spacing="2">
+    pluggoapp.nl  ·  @pluggoapp
+  </text>
+</svg>

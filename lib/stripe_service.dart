@@ -171,6 +171,56 @@ class StripePaymentIntentResult {
   }
 }
 
+/// Uitkomst van [StripeService.refreshAccountStatus].
+///
+/// Bevat de door Stripe bevestigde velden zoals ze óók zijn weggeschreven
+/// op profiles. UI kan direct op deze waarden vertrouwen zonder de DB
+/// opnieuw te queryen (al is dat ook prima — beide bronnen zijn nu
+/// consistent).
+class StripeAccountStatus {
+  /// Connected account id, format `acct_…`.
+  final String stripeAccountId;
+
+  /// Onze enum-projectie van Stripe's ruwe capability-flags:
+  /// 'pending' | 'review' | 'verified' | 'restricted' | 'rejected'.
+  /// Alleen bij 'verified' mag de paaleigenaar boekingen ontvangen.
+  final String accountStatus;
+
+  /// Directe Stripe-vlaggen — handig als UI granulaire diagnose wil
+  /// tonen ("KYC compleet, maar wachten op bank-verificatie" enz.).
+  final bool chargesEnabled;
+  final bool payoutsEnabled;
+  final bool detailsSubmitted;
+
+  /// Human-readable lijst van velden die Stripe nog nodig heeft. Leeg
+  /// als KYC compleet is.
+  final List<String> currentlyDue;
+
+  const StripeAccountStatus({
+    required this.stripeAccountId,
+    required this.accountStatus,
+    required this.chargesEnabled,
+    required this.payoutsEnabled,
+    required this.detailsSubmitted,
+    required this.currentlyDue,
+  });
+
+  bool get isVerified => accountStatus == 'verified';
+
+  factory StripeAccountStatus.fromMap(Map<String, dynamic> map) {
+    return StripeAccountStatus(
+      stripeAccountId: map['stripe_account_id'] as String? ?? '',
+      accountStatus: map['stripe_account_status'] as String? ?? 'pending',
+      chargesEnabled: map['stripe_charges_enabled'] as bool? ?? false,
+      payoutsEnabled: map['stripe_payouts_enabled'] as bool? ?? false,
+      detailsSubmitted: map['stripe_details_submitted'] as bool? ?? false,
+      currentlyDue: ((map['stripe_currently_due'] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList(growable: false),
+    );
+  }
+}
+
 /// Gegooid bij alle voorspelbare faal-paden — UI hoort dit te catchen en
 /// het bericht in een SnackBar te tonen. NL-only, geen i18n nodig.
 class StripeServiceException implements Exception {
@@ -250,6 +300,70 @@ class StripeService {
       debugPrint('StripeService.startOnboarding failed: $e\n$st');
       throw StripeServiceException(
         'Onbekende fout bij starten van Stripe-onboarding: $e',
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // REFRESH — on-demand pull-based sync van Stripe account state naar
+  // profiles-row. Bestaansreden: onze push-based webhook (`stripe-webhook`
+  // destination `pluggo-backend-v2-accounts-live`) ontvangt in productie
+  // aantoonbaar géén real v2 account events (alleen pings), ondanks
+  // aantoonbaar juiste destination-configuratie. Zonder deze fallback zou
+  // `stripe_account_status` eeuwig op 'pending' blijven staan tot iemand
+  // handmatig SQL draait. Aanroepen op:
+  //   • openen van het profielscherm
+  //   • terugkeer uit Stripe hosted onboarding (deep link handler)
+  //   • aanmaken van een nieuwe paal (safety-net)
+  //
+  // Idempotent — kan zonder bijwerkingen zo vaak worden aangeroepen als
+  // de app wil. Returns de verse status, of null als er geen Stripe
+  // account op het profiel staat.
+  // --------------------------------------------------------------------------
+  Future<StripeAccountStatus?> refreshAccountStatus() async {
+    try {
+      debugPrint('StripeService.refreshAccountStatus: invoking edge function');
+      final res = await _client.functions
+          .invoke('stripe-refresh-account')
+          .timeout(
+            const Duration(seconds: 15),
+            onTimeout: () {
+              debugPrint('StripeService.refreshAccountStatus: TIMEOUT na 15s');
+              throw StripeServiceException(
+                'Server reageert niet — controleer je internetverbinding',
+              );
+            },
+          );
+      debugPrint(
+        'StripeService.refreshAccountStatus: edge function returned status=${res.status}',
+      );
+      _throwIfError(res, fallback: 'Kon Stripe-status niet ophalen');
+
+      final data = res.data;
+      if (data is! Map<String, dynamic>) {
+        throw StripeServiceException(
+          'Onverwacht antwoord van server bij Stripe-refresh',
+        );
+      }
+
+      final synced = data['synced'] as bool? ?? false;
+      if (!synced) {
+        // Nog geen Stripe account — geen fout, geen state om te syncen.
+        return null;
+      }
+      return StripeAccountStatus.fromMap(data);
+    } on StripeServiceException {
+      rethrow;
+    } on FunctionException catch (e, st) {
+      debugPrint('StripeService.refreshAccountStatus FunctionException: $e\n$st');
+      throw _functionExceptionToStripeException(
+        e,
+        fallback: 'Kon Stripe-status niet ophalen',
+      );
+    } catch (e, st) {
+      debugPrint('StripeService.refreshAccountStatus failed: $e\n$st');
+      throw StripeServiceException(
+        'Onbekende fout bij Stripe-refresh: $e',
       );
     }
   }

@@ -1,0 +1,6 @@
+adres,expected,lat,lng,status,heeft_laadpaal,confidence,signalen,ev_merk,notitie,n_photos,labels
+"Straat van Gibraltar 32, Amersfoort",True,52.1900117,5.4158138,NO_STREETVIEW,,,,,,0,
+"Straat van Gibraltar 28, Amersfoort",True,52.1899733,5.4155232,NO_STREETVIEW,,,,,,0,
+"Straat van Gibraltar 26, Amersfoort",True,52.189969,5.415382,NO_STREETVIEW,,,,,,0,
+"Straat van Gibraltar 12, Amersfoort",True,52.1899615,5.4149964,NO_STREETVIEW,,,,,,0,
+"Straat van Gibraltar 170, Amersfoort",True,52.1904995,5.4235458,NO_STREETVIEW,,,,,,0,
