@@ -611,6 +611,77 @@
       font-weight: 600;
     }
 
+    /* ---------- SMART PAAL ---------- */
+    .feature-list {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 36px;
+    }
+    @media (max-width: 900px) {
+      .feature-list { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) {
+      .feature-list { grid-template-columns: 1fr; }
+    }
+    .feature-card {
+      padding: 24px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      position: relative;
+    }
+    .feature-card .f-icon {
+      font-size: 28px;
+      margin-bottom: 14px;
+      display: block;
+    }
+    .feature-card h3 {
+      font-size: 17px;
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    .feature-card p {
+      font-size: 15px;
+      color: var(--muted);
+      margin: 0;
+      line-height: 1.55;
+    }
+    .feature-card .new-pill {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: var(--primary-light);
+      color: var(--primary);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 99px;
+    }
+    .smart-paal-intro {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      background: var(--primary-light);
+      border-radius: 16px;
+      padding: 24px;
+      margin-top: 32px;
+    }
+    .smart-paal-intro .spi-icon {
+      font-size: 36px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .smart-paal-intro p {
+      margin: 6px 0 0;
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    .smart-paal-intro strong { color: var(--primary); }
+
     /* ---------- HOW IT WORKS ---------- */
     .how-grid {
       display: grid;
@@ -1092,6 +1163,7 @@
       <div class="nav-links">
         <a href="#wat-is-pluggo">Wat is Pluggo</a>
         <a href="#hoe-werkt-het">Hoe werkt het</a>
+        <a href="#slimme-paal">Slimme paal</a>
         <a href="#slim-laden">Slim laden</a>
         <div class="nav-dropdown">
           <a href="#gidsen">Gidsen</a>
@@ -1115,7 +1187,7 @@
     </div>
     <h1>Laadpaal delen.<br/><span class="highlight">Het laadnet van de buurt zelf.</span></h1>
     <p class="lead">
-      Pluggo is een marktplaats waar buren hun eigen thuislaadpaal delen. Heb je een paal op je oprit? Zet 'm in de app, kies je prijs, laat buren zonder eigen paal er een tijdslot op boeken. Zij laden goedkoper dan bij een publieke paal, jij verdient aan de uren dat je paal toch stilstaat. Geen laadpas, geen abonnement, geen tussenpartij.
+      Pluggo is een marktplaats waar buren hun eigen thuislaadpaal delen. Heb je een paal op je oprit? Zet de paal in de app, kies je prijs, laat buren zonder eigen paal er een tijdslot op boeken. Zij laden goedkoper dan bij een publieke paal, jij verdient aan de uren dat je paal toch stilstaat. Geen laadpas, geen abonnement, geen tussenpartij.
     </p>
 
     <div class="cta-row">
@@ -1157,8 +1229,8 @@
         <div class="card wel-card">
           <div class="wel-niet-tag">✅ Dit is Pluggo wél</div>
           <ul class="wel-niet-list">
-            <li><strong>Een marktplaats</strong> voor privé-thuispalen — jij zet 'm op de kaart, buren boeken 'm.</li>
-            <li><strong>De paaleigenaar bepaalt alles zelf</strong>: prijs per kWh, beschikbaarheid, welke boekingen ie accepteert.</li>
+            <li><strong>Een marktplaats</strong> voor privé-thuispalen — paaleigenaren zetten de paal op de kaart, rijders boeken een tijdslot.</li>
+            <li><strong>De paaleigenaar bepaalt alles zelf</strong>: prijs per kWh, beschikbaarheid, welke boekingen worden geaccepteerd.</li>
             <li><strong>Boekingen én betalingen lopen via de Pluggo-app</strong> (iDEAL, creditcard, Apple/Google Pay). Uitbetaling op je IBAN.</li>
             <li><strong>Werkt met vrijwel alle thuispalen</strong> waar jij zelf de app-beheerder van bent: Wallbox, Alfen, Easee, EVBox, Heidelberg, Ratio, Schneider, Tesla Wall Connector, en de meeste andere OCPP-palen. → <a href="./welke-laadpaal-werkt.html">Check in 3 vragen of jouw paal geschikt is</a>.</li>
             <li><strong>Servicefee: €0,03/kWh per kant</strong> (paaleigenaar én rijder), dus €0,06/kWh totaal. Geen abonnement, geen verborgen kosten.</li>
@@ -1170,10 +1242,9 @@
           <ul class="wel-niet-list">
             <li><strong>Geen laadpas of laadpas-abonnement.</strong> Je hoeft geen extra kaartje te dragen — de sessie loopt via de Pluggo-app op je telefoon.</li>
             <li><strong>Geen publiek laadnetwerk.</strong> Wij zijn geen Allego, Vattenfall of Fastned. We hebben zelf geen palen — we ontsluiten die van jou en je buren.</li>
-            <li><strong>Geen paal-verkoper of installateur.</strong> Je moet zelf al een thuislaadpaal hebben (of buurman kennen die er één heeft) om mee te doen.</li>
+            <li><strong>Geen paal-verkoper of installateur.</strong> Je moet zelf al een thuislaadpaal hebben (of iemand in de buurt kennen die er een heeft) om mee te doen.</li>
             <li><strong>Geen snellaadstation.</strong> Thuispalen laden via wisselstroom (Mode 3, Type 2), gemiddeld 11–22 kW — geen 150+ kW DC-snelladen zoals langs de snelweg.</li>
             <li><strong>Geen automatische afrekening per aansluiting.</strong> De paaleigenaar vult ná de sessie het werkelijk geladen kWh in. Pas dán volgt een betaalverzoek.</li>
-            <li><strong>Nog geen verzekering bij schade.</strong> Op dit moment is elke boeking een uitleen-overeenkomst tussen twee particulieren. Aan een verzekeringslaag werken we voor een latere versie.</li>
           </ul>
         </div>
       </div>
@@ -1185,7 +1256,7 @@
       <div class="eyebrow">Waarom Pluggo anders is</div>
       <h2>Tot <span class="highlight">50% goedkoper</span> dan een publieke paal — en hier is waarom.</h2>
       <p class="section-lead">
-        Bij een gewone publieke laadpaal zit er een hele rij bedrijven tussen jou en de stroom. Elk pakt z'n marge. Pluggo snijdt die hele tussenlaag weg — je laadt direct bij iemand thuis, betaalt direct via de app, klaar.
+        Bij een gewone publieke laadpaal zit er een hele rij bedrijven tussen jou en de stroom. Elk pakt zijn marge. Pluggo snijdt die hele tussenlaag weg — je laadt direct bij iemand thuis, betaalt direct via de app, klaar.
       </p>
 
       <div class="grid-2 compare-grid">
@@ -1239,7 +1310,7 @@
           Pluggo laat mensen hun privélaadpaal delen met mensen die er één nodig hebben. Laadpaal delen werkt net als Airbnb voor logeerkamers — maar dan voor de paal naast je voordeur.
         </p>
         <ul>
-          <li>Deel je privélaadpaal met de buurt op de tijden dat 'ie tóch leegstaat</li>
+          <li>Deel je privélaadpaal met de buurt op de tijden dat de paal toch leegstaat</li>
           <li>Vind een laadplek dichtbij, vaak goedkoper dan een publieke</li>
           <li>Eigenaar bepaalt zelf de prijs en de beschikbaarheid</li>
           <li>Betaal exact het aantal kWh dat je hebt afgenomen</li>
@@ -1278,7 +1349,7 @@
         <div class="card">
           <div class="icon">⚡</div>
           <h3>Voor het stroomnet</h3>
-          <p>Het Nederlandse net loopt tegen z'n grenzen. Avondpieken zijn extreem, overdag staat capaciteit ongebruikt. De infrastructuur die er ligt blijft voor 80% onbenut.</p>
+          <p>Het Nederlandse net loopt tegen zijn grenzen. Avondpieken zijn extreem, overdag staat capaciteit ongebruikt. De infrastructuur die er ligt blijft voor 80% onbenut.</p>
         </div>
       </div>
     </div>
@@ -1298,7 +1369,7 @@
           <div class="step">
             <div class="step-num">1</div>
             <div class="step-body">
-              <strong>Voeg je paal toe & zet 'm op vrij-laden</strong>
+              <strong>Voeg je paal toe en stel hem in op vrij-laden</strong>
               <span>Adres, foto, laadvermogen, prijs per kWh — klaar in een paar minuten. Zet in de app van je paal-merk (Wallbox, Alfen, Easee, etc.) de vrij-laden modus aan zodat boekers zonder laadpas kunnen starten.</span>
             </div>
           </div>
@@ -1355,6 +1426,67 @@
               <span>Nadat je klaar bent, vult de eigenaar de kWh-stand in. Je krijgt een betaalverzoek in de app en rekent af via iDEAL, creditcard of Apple/Google Pay. Vaak flink goedkoper dan een publieke paal — zonder abonnement.</span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt-bg" id="slimme-paal">
+    <div class="section-inner">
+      <div class="eyebrow">Slimme paal</div>
+      <h2>Jouw laadpaal, <span class="highlight">volledig in jouw handen.</span></h2>
+      <p class="section-lead">
+        Heb je een OCPP-laadpaal? Koppel hem eenmalig in de app en Pluggo neemt het beheer over — van boeking tot afrekening, met live inzicht terwijl er geladen wordt.
+      </p>
+
+      <div class="smart-paal-intro">
+        <div class="spi-icon">🔌</div>
+        <div>
+          <strong>Stap-voor-stap koppelwizard per merk</strong>
+          <p>Wallbox, Alfen, Easee, ABB, Vestel, Zaptec — voor elk merk loodst de app je door de exacte instelling. Geen handleiding erbij zoeken, geen support-mail. Gemiddeld gekoppeld in 8 minuten.</p>
+        </div>
+      </div>
+
+      <div class="feature-list">
+        <div class="feature-card">
+          <span class="new-pill">Nieuw</span>
+          <span class="f-icon">📊</span>
+          <h3>Live kWh-teller tijdens de sessie</h3>
+          <p>Zie in real-time hoeveel kilowattuur er al geladen is, het huidige laadvermogen in kW en hoe lang de sessie loopt — rechtstreeks in je dashboard.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="new-pill">Nieuw</span>
+          <span class="f-icon">🔔</span>
+          <h3>Push als je tijdslot bijna verloopt</h3>
+          <p>15 minuten voor het einde van een boeking krijg je een pushbericht: "Je tijdslot verloopt bijna." Zo staat je oprit altijd op tijd leeg — zonder dat je de klok in de gaten hoeft te houden.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="new-pill">Nieuw</span>
+          <span class="f-icon">⏰</span>
+          <h3>Herinnering om kWh in te vullen</h3>
+          <p>Vergeten het verbruik in te voeren na een sessie? Na 2 uur krijg je automatisch een push. De boeker kan pas definitief afrekenen als jij het verbruik invult — de herinnering houdt dat vlot.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="new-pill">Nieuw</span>
+          <span class="f-icon">🚫</span>
+          <h3>"Geen lading" — één knop</h3>
+          <p>Boeker stond in de file en heeft niets geladen? Tik op "Geen lading" en de boeking wordt direct afgesloten zonder betaalverzoek. Geen gedoe, eerlijk voor iedereen.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="new-pill">Nieuw</span>
+          <span class="f-icon">📋</span>
+          <h3>ERE-tegel: maandelijks kWh-overzicht</h3>
+          <p>Ben je een zakelijke host? De ERE-tegel berekent automatisch het totale kWh-verbruik per maand — precies wat je nodig hebt voor de ERE-aanvraag bij je netbeheerder.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="f-icon">🏷️</span>
+          <h3>Smart-badge op de kaart</h3>
+          <p>Rijders zien in één oogopslag welke palen OCPP-gekoppeld zijn. Een smart-badge geeft aan dat de sessie automatisch wordt gestart — geen handmatig contact nodig met de eigenaar.</p>
         </div>
       </div>
     </div>
@@ -1426,7 +1558,7 @@
   <section id="impact">
     <div class="section-inner section-narrow">
       <div class="eyebrow">De toekomst</div>
-      <h2>De grootste laadinfrastructuur staat al in Nederland — we moeten 'm alleen nog ontsluiten.</h2>
+      <h2>De grootste laadinfrastructuur staat al in Nederland — die moeten we alleen nog ontsluiten.</h2>
 
       <div class="impact-text">
         <p>
@@ -1550,7 +1682,7 @@
       <details>
         <summary>Heb ik zonnepanelen nodig om mee te doen?</summary>
         <p>Nee — Pluggo werkt met of zonder zonnepanelen. Maar áls je zonnepanelen hebt, is geld verdienen met zonnepanelen via je laadpaal op dit moment een van de slimste opties die er is. Door de afbouw van de salderingsregeling en de terugleverboetes die steeds meer energieleveranciers invoeren, wordt je terugleververgoeding richting €0,05-0,10/kWh — terwijl je dezelfde stroom zelf inkocht voor €0,30+/kWh.</p>
-        <p>Via Pluggo verkoop je je zonnestroom-overschot rechtstreeks aan een buur die zijn EV oplaadt, voor pak 'm beet €0,25-0,30/kWh. Voor een gemiddelde installatie van tien panelen (~3.500 kWh per jaar, waarvan zo'n 1.500 kWh overschot) levert dat tussen de €300 en €450 per jaar extra op, vergeleken met terugleveren aan je leverancier. Bij een grotere installatie met veel overschot kan dat oplopen tot €1.000+ per jaar — geld dat je anders gewoon kwijtraakt aan de afbouw van saldering.</p>
+        <p>Via Pluggo verkoop je je zonnestroom-overschot rechtstreeks aan een buur die zijn EV oplaadt, voor ongeveer €0,25-0,30/kWh. Voor een gemiddelde installatie van tien panelen (~3.500 kWh per jaar, waarvan zo'n 1.500 kWh overschot) levert dat tussen de €300 en €450 per jaar extra op, vergeleken met terugleveren aan je leverancier. Bij een grotere installatie met veel overschot kan dat oplopen tot €1.000+ per jaar — geld dat je anders gewoon kwijtraakt aan de afbouw van saldering.</p>
         <p>→ <a href="./zonnepanelen-verdienen.html">Lees de uitgebreide gids: geld verdienen met zonnepanelen na de salderingsregeling</a></p>
       </details>
 
