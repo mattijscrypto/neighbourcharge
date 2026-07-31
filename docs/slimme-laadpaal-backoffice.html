@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gratis laadpaal-backoffice — eigen sessies, ERE & automatische facturatie | Pluggo</title>
+  <meta name="description" content="Pluggo vervangt je dure backoffice: start eigen laadsessies, houd kWh bij in een live dashboard, identificeer rijders, ontvang push meldingen en laat ERE automatisch registreren. Altijd gratis." />
+  <link rel="canonical" href="https://pluggoapp.nl/slimme-laadpaal-backoffice.html" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:title" content="Gratis laadpaal-backoffice — eigen sessies, ERE & automatische facturatie | Pluggo" />
+  <meta property="og:description" content="Stop met betalen voor een backoffice. Pluggo is gratis: eigen sessies, live dashboard, rijdersidentificatie, push meldingen en ERE-registratie." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://pluggoapp.nl/slimme-laadpaal-backoffice.html" />
+  <meta property="og:image" content="https://pluggoapp.nl/og-verhuren.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Gratis laadpaal-backoffice via Pluggo | Pluggo" />
+  <meta name="twitter:description" content="Eigen sessies bijhouden, live kWh, ERE, push meldingen en automatische facturatie. Gratis, zonder maandabonnement." />
+  <meta name="twitter:image" content="https://pluggoapp.nl/og-verhuren.jpg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Article",
+        "headline": "Gratis laadpaal-backoffice — eigen sessies, ERE & automatische facturatie",
+        "description": "Pluggo vervangt je dure backoffice: eigen sessies bijhouden, live kWh-dashboard, rijdersidentificatie, push meldingen en ERE-registratie via MID-meter. Altijd gratis.",
+        "image": "https://pluggoapp.nl/og-verhuren.jpg",
+        "author": {
+          "@type": "Person",
+          "name": "Ra'ka Cazander",
+          "jobTitle": "Oprichter Pluggo",
+          "url": "https://pluggoapp.nl"
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "Pluggo",
+          "logo": { "@type": "ImageObject", "url": "https://pluggoapp.nl/apple-touch-icon.png" }
+        },
+        "datePublished": "2026-07-30",
+        "dateModified": "2026-07-30",
+        "mainEntityOfPage": { "@type": "WebPage", "@id": "https://pluggoapp.nl/slimme-laadpaal-backoffice.html" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://pluggoapp.nl/" },
+          { "@type": "ListItem", "position": 2, "name": "Gidsen", "item": "https://pluggoapp.nl/#gidsen" },
+          { "@type": "ListItem", "position": 3, "name": "Gratis laadpaal-backoffice", "item": "https://pluggoapp.nl/slimme-laadpaal-backoffice.html" }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Kost Pluggo iets als ik alleen mijn eigen laadsessies bijhoud?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Nee. Het bijhouden van eigen laadsessies via Pluggo is volledig gratis. Je betaalt geen maandabonnement en geen starttarief. Alleen als je buren laat laden, houdt Pluggo een kleine platformfee (€0,03/kWh per kant) in op die sessies."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Werkt Pluggo als backoffice als ik geen buren laat laden?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja. Je kunt Pluggo uitsluitend gebruiken voor het bijhouden van je eigen laadsessies, zonder de paal beschikbaar te stellen voor anderen. Je koppelt je OCPP-paal eenmalig, en daarna start je eigen sessies via de app. Je ziet een live dashboard, de maandtotalen en je kWh-geschiedenis — zonder dat rijders je paal kunnen boeken."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wat heb ik nodig om Pluggo als backoffice te gebruiken?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Je hebt een laadpaal nodig die OCPP 1.6 JSON of OCPP 2.0.1 ondersteunt. Dat geldt voor de meeste moderne thuislaadpalen: Wallbox, Alfen, Easee, EVBox, ABB, Vestel, Zaptec en meer. Je koppelt de paal eenmalig via de koppelwizard in de app (gemiddeld 8 minuten). Daarna is je paal beschikbaar als backoffice."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Hoe werkt de ERE-registratie via Pluggo?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "ERE staat voor Energie Reken Eenheid — het mechanisme waarmee zakelijke afnemers via hun netbeheerder energiebelasting terugvragen op geleverde kWh. Pluggo registreert automatisch alle kWh die via jouw OCPP-paal worden geleverd: eigen sessies én verhuursessies. In het maandoverzicht zie je het totale ERE-kWh, plus een schatting van de terugvorderbare energiebelasting (standaard €0,22/kWh). Voor een valide ERE-aanvraag is een MID-gecertificeerde meter vereist — als jouw paal die heeft, zet Pluggo de ERE-tegel automatisch aan."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Hoe verschilt de push melding 'auto bijna vol' van andere push meldingen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "De push 'je auto is over ±15 minuten vol' gaat naar de rijder — niet naar de host. Pluggo berekent dit op basis van het opgegeven batterijvermogen en het actuele laadvermogen (kW) dat via OCPP binnenkomt. Zodra de berekende resterende laadtijd onder de 15 minuten zakt, stuurt Pluggo de melding. Zo weet de rijder precies wanneer hij er aan moet zijn zonder de laadpaal te blokkeren."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Kan ik Pluggo gebruiken naast een bestaand backoffice-abonnement?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Een OCPP-paal kan maar aan één centrale zijn gekoppeld tegelijk. Je kunt Pluggo dus niet parallel naast E-Flux, New Motion of een andere backoffice gebruiken. Je stelt de Pluggo-OCPP-URL in als primaire centrale en Pluggo beheert de paal volledig. Voor palen die via een lease-constructie zijn gebonden aan een specifieke backoffice is overstappen helaas niet mogelijk."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      --primary: #0B6B3A;
+      --primary-light: #E8F7F1;
+      --accent: #FFC857;
+      --text: #1A1F1C;
+      --muted: #5C6B63;
+      --border: #E4EBE7;
+      --bg: #FAFBFA;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 32px;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .logo-mark {
+      width: 36px;
+      height: 36px;
+      background: var(--primary);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 20px;
+    }
+    .logo-text { font-weight: 700; font-size: 20px; }
+    h1 {
+      font-size: 38px;
+      font-weight: 800;
+      margin: 8px 0 12px;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+    }
+    .byline { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
+    .lead { font-size: 19px; color: var(--text); margin: 0 0 32px; }
+    h2 {
+      font-size: 26px;
+      font-weight: 700;
+      margin: 48px 0 14px;
+      letter-spacing: -0.015em;
+      line-height: 1.25;
+    }
+    h3 { font-size: 19px; font-weight: 700; margin: 28px 0 10px; }
+    p { margin: 0 0 14px; }
+    ul, ol { padding-left: 22px; }
+    li { margin-bottom: 8px; }
+    a { color: var(--primary); text-decoration: underline; }
+    strong { font-weight: 700; }
+
+    /* Callout */
+    .callout {
+      padding: 20px 24px;
+      background: var(--primary-light);
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      margin: 24px 0;
+    }
+    .callout p { margin: 0; }
+
+    /* Comparison table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0 28px;
+      font-size: 15px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: #F4F8F6; font-weight: 700; color: var(--text); font-size: 14px; }
+    tr:last-child td { border-bottom: none; }
+    td.good { color: var(--primary); font-weight: 700; }
+    td.bad { color: #B94A48; }
+
+    /* Feature grid */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 24px 0 36px;
+    }
+    .feat {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .feat .icon { font-size: 28px; margin-bottom: 10px; }
+    .feat h3 { font-size: 16px; margin: 0 0 8px; }
+    .feat p { font-size: 15px; color: var(--muted); margin: 0; line-height: 1.5; }
+    .feat.highlight { background: var(--primary-light); border-color: #B2D9C6; }
+
+    /* Steps */
+    .steps { counter-reset: step; list-style: none; padding: 0; margin: 24px 0 32px; }
+    .steps li { counter-increment: step; display: flex; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+    .steps li::before {
+      content: counter(step);
+      min-width: 32px; height: 32px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      font-weight: 700; font-size: 15px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 2px;
+    }
+
+    /* Push mockup */
+    .push-card {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px 18px;
+      margin: 12px 0;
+    }
+    .push-icon {
+      width: 40px; height: 40px;
+      background: var(--primary-light);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+    }
+    .push-body .push-title { font-weight: 700; font-size: 15px; margin: 0 0 3px; }
+    .push-body .push-sub { font-size: 14px; color: var(--muted); margin: 0; }
+
+    /* CTA */
+    .cta-banner {
+      margin: 48px 0;
+      padding: 32px 28px;
+      background: var(--primary);
+      color: white;
+      border-radius: 16px;
+      text-align: center;
+    }
+    .cta-banner h3 { margin: 0 0 8px; font-size: 22px; color: white; }
+    .cta-banner p { margin: 0 0 18px; opacity: 0.92; }
+    .cta-banner .btn {
+      display: inline-block;
+      padding: 12px 24px;
+      background: white;
+      color: var(--primary) !important;
+      text-decoration: none;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    /* FAQ */
+    details {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-bottom: 10px;
+    }
+    summary { font-weight: 600; cursor: pointer; list-style: none; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: " +"; color: var(--primary); }
+    details[open] summary::after { content: " −"; }
+    details p { margin: 12px 0 0; }
+
+    /* Related */
+    .related { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--border); }
+    .related h3 { margin-top: 0; }
+
+    footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+    footer a { color: var(--muted); }
+
+    @media (max-width: 600px) {
+      h1 { font-size: 28px; }
+      h2 { font-size: 22px; }
+      .feature-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <!-- Cloudflare Web Analytics -->
+  <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "bb8620f813fd41afa6c3b55baf8cc125"}'></script>
+</head>
+<body>
+  <div class="container">
+    <a href="./" class="logo">
+      <div class="logo-mark">P</div>
+      <span class="logo-text">Pluggo</span>
+    </a>
+
+    <h1>Gratis laadpaal-backoffice — eigen sessies, ERE en automatische facturatie</h1>
+    <p class="byline">Door Ra'ka Cazander · Gepubliceerd: 30 juli 2026</p>
+
+    <p class="lead">
+      Een OCPP-laadpaal thuis en betaal je nog €7–€15 per maand voor een backoffice? Dat hoeft niet meer. Pluggo is je gratis backoffice: eigen laadsessies starten vanuit de app, live meekijken wat er geladen wordt, automatische facturatie bij verhuur aan buren, en maandelijkse ERE-registratie voor energiebelastingteruggave. Zonder maandabonnement.
+    </p>
+
+    <h2>Wat kost een gewone backoffice?</h2>
+    <p>
+      De meeste OCPP-laadpalen worden geleverd met een koppeling naar een commerciële backoffice. Praktisch, maar je betaalt er maandelijks voor — en je backoffice weet niets van je buren of ERE.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Backoffice</th>
+          <th>Maandkosten</th>
+          <th>Eigen sessies</th>
+          <th>Verhuur aan buren</th>
+          <th>ERE-registratie</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>E-Flux / Shell Recharge</td>
+          <td class="bad">€7–€12/mnd</td>
+          <td>✓</td>
+          <td class="bad">✗</td>
+          <td class="bad">Handmatig</td>
+        </tr>
+        <tr>
+          <td>New Motion Business</td>
+          <td class="bad">€6–€10/mnd</td>
+          <td>✓</td>
+          <td class="bad">✗</td>
+          <td class="bad">Handmatig</td>
+        </tr>
+        <tr>
+          <td>EVBox Business Portal</td>
+          <td class="bad">€8–€15/mnd</td>
+          <td>✓</td>
+          <td class="bad">✗</td>
+          <td class="bad">Handmatig</td>
+        </tr>
+        <tr>
+          <td>Allego SmartHome</td>
+          <td class="bad">€5–€9/mnd</td>
+          <td>✓</td>
+          <td class="bad">✗</td>
+          <td class="bad">Handmatig</td>
+        </tr>
+        <tr>
+          <td><strong>Pluggo</strong></td>
+          <td class="good">Gratis</td>
+          <td class="good">✓</td>
+          <td class="good">✓</td>
+          <td class="good">Automatisch</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <p>Bij verhuur aan buren betaal je alleen een platformfee van €0,03/kWh per kant — geen vaste maandkosten. Gebruik je Pluggo puur voor eigen sessies zonder verhuur? Dan is het altijd €0.</p>
+    </div>
+
+    <h2>Wat zit er in de gratis backoffice?</h2>
+
+    <div class="feature-grid">
+      <div class="feat highlight">
+        <div class="icon">⚡</div>
+        <h3>Eigen sessies starten</h3>
+        <p>Start je eigen laadsessie vanuit de Pluggo-app met één tik. Je sessie wordt apart bijgehouden van verhuursessies — je ziet altijd precies wat je zelf hebt geladen versus wat buren hebben afgenomen.</p>
+      </div>
+
+      <div class="feat highlight">
+        <div class="icon">📊</div>
+        <h3>Live dashboard tijdens het laden</h3>
+        <p>Zie in real-time het huidige laadvermogen (kW), het totale kWh dat al geladen is, en hoe lang de sessie al loopt. Direct vanuit je OCPP-verbinding — geen vertraging.</p>
+      </div>
+
+      <div class="feat">
+        <div class="icon">🪪</div>
+        <h3>Rijdersidentificatie</h3>
+        <p>Iedere rijder die via Pluggo boekt is gekoppeld aan een geverifieerd Pluggo-account. Je weet altijd wie er op jouw oprit staat — naam, sessiehistorie, en betalingsstatus — zonder moeite.</p>
+      </div>
+
+      <div class="feat">
+        <div class="icon">🧾</div>
+        <h3>Automatische kWh-facturatie</h3>
+        <p>Bij verhuursessies stelt Pluggo automatisch een self-billing factuur op namens jou. BTW-status (KOR of zakelijk), de juiste tarieven, kWh-onderbouwing — het klopt altijd, zonder dat jij een factuurprogramma hoeft aan te raken.</p>
+      </div>
+
+      <div class="feat">
+        <div class="icon">🌿</div>
+        <h3>ERE-registratie automatisch</h3>
+        <p>Pluggo telt alle kWh op die via jouw paal worden geleverd — eigen laden én verhuur. In je maandoverzicht zie je het ERE-totaal inclusief een schatting van de terugvorderbare energiebelasting (≈&nbsp;€0,22/kWh). Klaar voor je aanvraag bij de netbeheerder.</p>
+      </div>
+
+      <div class="feat">
+        <div class="icon">📈</div>
+        <h3>Maandoverzicht in drie tegels</h3>
+        <p>Je host-dashboard toont drie maandtotalen naast elkaar: eigen geladen kWh, verhuur kWh + verdiend bedrag, en het ERE-totaal. Eén blik, compleet beeld.</p>
+      </div>
+    </div>
+
+    <h2>Push meldingen die er toe doen</h2>
+    <p>
+      Pluggo stuurt gerichte push meldingen op het juiste moment — niet een stroom van notificaties, maar de meldingen die je echt nodig hebt.
+    </p>
+
+    <div class="push-card">
+      <div class="push-icon">🔋</div>
+      <div class="push-body">
+        <p class="push-title">Je auto is over ±15 minuten vol</p>
+        <p class="push-sub">Pluggo berekent op basis van je rijdersinvoer (batterijcapaciteit) en het actuele laadvermogen wanneer de auto vol is — en stuurt de rijder op tijd een seintje.</p>
+      </div>
+    </div>
+
+    <div class="push-card">
+      <div class="push-icon">⏰</div>
+      <div class="push-body">
+        <p class="push-title">Je tijdslot verloopt over 15 minuten</p>
+        <p class="push-sub">Als rijder weet je altijd wanneer je er aan moet zijn zodat de oprit op tijd vrij is voor de eigenaar of de volgende boeker.</p>
+      </div>
+    </div>
+
+    <div class="push-card">
+      <div class="push-icon">📋</div>
+      <div class="push-body">
+        <p class="push-title">Vergeten kWh in te voeren</p>
+        <p class="push-sub">Als host ontvang je 2 uur na de sessie een herinnering als je het verbruik nog niet hebt ingevuld. De boeker kan pas definitief afrekenen als dat is gedaan.</p>
+      </div>
+    </div>
+
+    <div class="push-card">
+      <div class="push-icon">🔔</div>
+      <div class="push-body">
+        <p class="push-title">Nieuwe boeking op je paal</p>
+        <p class="push-sub">Zodra een rijder een tijdslot op jouw paal boekt, ontvang je direct een push met de datum, het tijdvak en de naam van de rijder.</p>
+      </div>
+    </div>
+
+    <h2>ERE — energiebelasting terugvorderen</h2>
+    <p>
+      ERE (Energie Reken Eenheid) is een regeling waarmee zakelijke afnemers de energiebelasting terugvorderen die is betaald over kWh die via hun laadpunt aan derden is geleverd. In 2026 gaat het om <strong>ca. €0,22 per kWh</strong>. Bij 312 kWh aan verhuursessies per maand is dat ruim <strong>€68 terug</strong> via je energieleverancier — per jaar meer dan €800.
+    </p>
+    <p>
+      Voorwaarden voor een geldige ERE-aanvraag:
+    </p>
+    <ul>
+      <li>Je bent zakelijk afnemer (niet KOR-particulier) of werkt via een erkende ERE-dienst.</li>
+      <li>Je laadpunt heeft een <strong>MID-gecertificeerde kWh-meter</strong> — dit is het juridisch geldige meetpunt.</li>
+      <li>Je kunt de geleverde kWh per periode aantonen.</li>
+    </ul>
+    <p>
+      Pluggo registreert automatisch alle kWh die via OCPP binnenkomen. Heb je een MID-meter op je paal, dan activeert Pluggo de ERE-tegel in je dashboard en houdt het systeem je maandtotalen bij. Je hoeft niets handmatig bij te houden.
+    </p>
+
+    <div class="callout">
+      <p><strong>Nog geen MID-meter?</strong> Veel installateurs kunnen een gecertificeerde submetering toevoegen aan je bestaande installatie. Vraag je installateur naar een MID-gecertificeerde sub­meter — dan is alles meteen klaar voor ERE én voor Pluggo.</p>
+    </div>
+
+    <h2>Hoe koppel je jouw laadpaal aan Pluggo?</h2>
+    <p>
+      Pluggo werkt met alle laadpalen die <strong>OCPP 1.6 JSON</strong> of <strong>OCPP 2.0.1</strong> ondersteunen. Dat geldt voor de meeste moderne thuislaadpalen.
+    </p>
+
+    <ol class="steps">
+      <li>
+        <div>
+          <strong>Download de Pluggo-app</strong> — gratis in de <a href="https://apps.apple.com/nl/app/pluggo/id6764389850" rel="noopener">App Store</a> of <a href="https://play.google.com/store/apps/details?id=nl.pluggoapp.pluggo" rel="noopener">Google Play</a>. Maak een account aan.
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Ga naar Mijn paal → Slimme paal koppelen</strong> — kies je merk. De wizard geeft je de exacte OCPP-URL die je in jouw paalsoftware invult. Per merk wordt uitgelegd waar die instelling zit.
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Vul de URL in je paal in</strong> — via de merk-app (myWallbox, Easee app, Alfen Connect) of webinterface. De meeste merken zijn gekoppeld in minder dan 8 minuten.
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Paal verschijnt online in de app</strong> — je ziet direct de verbindingsstatus. Vanaf nu kun je eigen sessies starten en bijhouden vanuit de app.
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Optioneel: paal beschikbaar stellen voor verhuur</strong> — stel je prijs en beschikbaarheidsvensters in. Je paal verschijnt op de Pluggo-kaart voor rijders in de buurt.
+        </div>
+      </li>
+    </ol>
+
+    <table>
+      <thead>
+        <tr><th>Merk</th><th>OCPP-versie</th><th>Instelling</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Wallbox Pulsar Plus / Commander</td><td>OCPP 1.6 JSON</td><td>Inschakelen via myWallbox-app → OCPP</td></tr>
+        <tr><td>Alfen Eve Single / Eve Pro</td><td>OCPP 1.6 JSON</td><td>Via ACE Service Installer of Alfen Connect</td></tr>
+        <tr><td>Easee Home / Charge</td><td>OCPP 1.6 JSON</td><td>Easee Partner Portal → OCPP instellen</td></tr>
+        <tr><td>ABB Terra AC</td><td>OCPP 1.6 JSON</td><td>Standaard beschikbaar via webinterface</td></tr>
+        <tr><td>Vestel EVC04</td><td>OCPP 1.6 JSON</td><td>Via webinterface van de paal</td></tr>
+        <tr><td>Zaptec Go / Pro</td><td>OCPP 1.6 JSON</td><td>Zaptec Portal → installatie → OCPP</td></tr>
+        <tr><td>EVBOX Elvi</td><td>OCPP 1.6 JSON</td><td>Standaard via EVBOX portal</td></tr>
+        <tr><td>Juice Charger me</td><td>OCPP 1.6 JSON</td><td>Juice Technology Portal</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Veelgestelde vragen</h2>
+
+    <details>
+      <summary>Kost Pluggo iets als ik alleen mijn eigen laadsessies bijhoud?</summary>
+      <p>Nee. Het bijhouden van eigen laadsessies via Pluggo is volledig gratis. Geen maandabonnement, geen starttarief. Alleen bij verhuur aan buren houdt Pluggo een kleine platformfee (€0,03/kWh per kant) in op die sessies.</p>
+    </details>
+
+    <details>
+      <summary>Kan ik Pluggo gebruiken zonder buren te laten laden?</summary>
+      <p>Ja. Je koppelt je paal eenmalig via OCPP en start eigen sessies via de app. Je ziet het live dashboard, maandtotalen en je kWh-geschiedenis. Je hoeft de paal niet beschikbaar te stellen voor anderen — dat is volledig optioneel.</p>
+    </details>
+
+    <details>
+      <summary>Hoe werkt de ERE-registratie precies?</summary>
+      <p>Pluggo registreert automatisch alle kWh die via OCPP binnenkomen. In je maandoverzicht zie je het totale ERE-kWh (eigen laden + verhuur bij sessies via een MID-gecertificeerde meter), plus een schatting van de terugvorderbare energiebelasting (ca. €0,22/kWh in 2026). Je dient de ERE-aanvraag in bij je eigen energieleverancier of via een erkende ERE-dienst. Pluggo levert het kWh-overzicht als onderbouwing.</p>
+    </details>
+
+    <details>
+      <summary>Kan ik Pluggo gebruiken naast een bestaand backoffice-abonnement?</summary>
+      <p>Nee — een OCPP-paal kan maar aan één centrale zijn gekoppeld tegelijk. Je stelt de Pluggo-OCPP-URL in als primaire centrale. Heb je een abonnement bij E-Flux of New Motion? Dat kun je opzeggen zodra Pluggo is gekoppeld. Voor palen die via een lease-constructie zijn gebonden aan een specifieke backoffice is overstappen helaas niet mogelijk.</p>
+    </details>
+
+    <details>
+      <summary>Wat als mijn paal niet OCPP ondersteunt?</summary>
+      <p>Je kunt Pluggo dan nog steeds gebruiken voor verhuur — de boeker start zelf de laadbeurt (vrij-laden modus) en jij voert achteraf handmatig de kWh in. Het live dashboard, eigen sessies en automatische ERE-registratie vereisen echter een OCPP-verbinding. Zie <a href="./welke-laadpaal-werkt.html">Werkt mijn laadpaal op Pluggo?</a> voor de check per merk.</p>
+    </details>
+
+    <details>
+      <summary>Hoe verschilt 'eigen sessie' van een verhuursessie in de app?</summary>
+      <p>Een eigen sessie start je zelf via de knop "Start eigen laadsessie" in het Mijn paal-dashboard. De sessie wordt bijgehouden als "eigen laden" en telt mee in je eigenKwh-totaal voor de maand. Een verhuursessie wordt gestart via een boeking van een rijder en telt mee in je verhuurKwh. Allebei tellen mee voor ERE als je paal een MID-meter heeft.</p>
+    </details>
+
+    <div class="cta-banner">
+      <h3>Koppel je laadpaal gratis aan Pluggo</h3>
+      <p>Geen maandabonnement. Eigen sessies bijhouden, ERE automatisch bijgehouden, en buren kunnen laadtijden bij je boeken als jij dat wilt.</p>
+      <a href="/" class="btn">Download de app</a>
+    </div>
+
+    <div class="related">
+      <h3>Verder lezen</h3>
+      <ul>
+        <li><a href="./laadpaal-verhuren.html">Laadpaal verhuren aan buren — zo werkt het en dit verdien je</a></li>
+        <li><a href="./welke-laadpaal-werkt.html">Werkt mijn laadpaal op Pluggo? Check in 3 vragen</a></li>
+        <li><a href="./zonnepanelen-verdienen.html">Geld verdienen met zonnepanelen na de salderingsregeling</a></li>
+        <li><a href="./goedkoop-laden.html">Goedkoop elektrisch laden in de buurt</a></li>
+        <li><a href="./">Terug naar de homepage</a></li>
+      </ul>
+    </div>
+
+    <footer>
+      © 2026 Pluggo · Een handelsnaam van Raka Cazander · <a href="./privacy.html">Privacybeleid</a> · <a href="./terms.html">Algemene voorwaarden</a> · <a href="./">Homepage</a>
+    </footer>
+  </div>
+</body>
+</html>

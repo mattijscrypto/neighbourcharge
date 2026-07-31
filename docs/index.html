@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Laadpaal delen met de buurt — Pluggo | P2P laadnetwerk NL</title>
-  <meta name="description" content="Laadpaal delen met je buurt — verdien aan je privélaadpaal of vind goedkoop laden in de buurt. App live in App Store en Google Play, boekingen door rijders zijn nu open." />
+  <meta name="description" content="Laadpaal delen met je buurt — verdien aan je privélaadpaal of vind goedkoop laden in de buurt. Gratis app in de App Store en Google Play." />
   <meta property="og:title" content="Laadpaal delen met de buurt — Pluggo" />
-  <meta property="og:description" content="Verdien aan je privélaadpaal of vind goedkoop laden om de hoek. App live in App Store &amp; Google Play — boekingen door rijders zijn nu open." />
+  <meta property="og:description" content="Verdien aan je privélaadpaal of vind goedkoop laden om de hoek. Download de gratis Pluggo-app in de App Store of Google Play." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://pluggoapp.nl" />
   <meta property="og:site_name" content="Pluggo" />
@@ -76,10 +76,10 @@
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "Wanneer gaat de app live?",
+            "name": "Hoe begin ik als paaleigenaar op Pluggo?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "De Pluggo-app staat in de Apple App Store en Google Play Store, en boekingen door rijders zijn nu open. Download de app, maak een account aan en — als paaleigenaar — voeg meteen je paal toe. Paaleigenaren die zich als pionier aanmelden krijgen postcode-voorrang in de zoekresultaten."
+              "text": "Download de gratis Pluggo-app in de App Store of Google Play, maak een account aan en voeg je laadpaal toe. Heb je een OCPP-paal? Koppel hem via de ingebouwde wizard — dan heb je ook een gratis backoffice voor eigen sessies, live kWh-dashboard en automatische ERE-registratie. Paaleigenaren die zich als pionier aanmelden krijgen postcode-voorrang in de zoekresultaten."
             }
           },
           {
@@ -550,6 +550,12 @@
     @media (max-width: 720px) {
       .grid-3 { grid-template-columns: 1fr; }
       .grid-2 { grid-template-columns: 1fr; }
+      /* Wel-niet kolommen blijven altijd naast elkaar, ook op mobile */
+      .wel-niet-grid { grid-template-columns: 1fr 1fr !important; gap: 10px; }
+      .wel-card, .niet-card { padding: 14px 12px; }
+      .wel-niet-tag { font-size: 11px; padding: 4px 9px; margin-bottom: 12px; }
+      .wel-niet-list li { font-size: 13px; padding: 7px 0 7px 20px; line-height: 1.45; }
+      .wel-niet-list li strong { display: block; }
     }
     .card {
       padding: 28px;
@@ -1170,6 +1176,7 @@
           <div class="nav-dropdown-menu">
             <a href="./goedkoop-laden.html">Goedkoop elektrisch laden bij de buren</a>
             <a href="./laadpaal-verhuren.html">Laadpaal verhuren aan buren</a>
+            <a href="./slimme-laadpaal-backoffice.html">Gratis backoffice voor je laadpaal</a>
             <a href="./zonnepanelen-verdienen.html">Geld verdienen met zonnepanelen</a>
             <a href="./welke-laadpaal-werkt.html">Werkt mijn laadpaal op Pluggo?</a>
           </div>
@@ -1181,10 +1188,6 @@
   </nav>
 
   <header class="hero">
-    <div class="badge">
-      <span class="dot"></span>
-      App live · Boekingen door rijders zijn nu open
-    </div>
     <h1>Laadpaal delen.<br/><span class="highlight">Het laadnet van de buurt zelf.</span></h1>
     <p class="lead">
       Pluggo is een marktplaats waar buren hun eigen thuislaadpaal delen. Heb je een paal op je oprit? Zet de paal in de app, kies je prijs, laat buren zonder eigen paal er een tijdslot op boeken. Zij laden goedkoper dan bij een publieke paal, jij verdient aan de uren dat je paal toch stilstaat. Geen laadpas, geen abonnement, geen tussenpartij.
@@ -1213,7 +1216,7 @@
     </div>
 
     <p style="margin: 0 auto 32px; font-size: 13px; color: var(--muted); max-width: 480px;">
-      <strong>App live · boekingen open.</strong> Voeg vandaag je laadpaal toe — pioniers krijgen postcode-voorrang in de zoekresultaten.
+      Voeg vandaag je laadpaal toe — pioniers krijgen postcode-voorrang in de zoekresultaten.
     </p>
   </header>
 
@@ -1232,9 +1235,9 @@
             <li><strong>Een marktplaats</strong> voor privé-thuispalen — paaleigenaren zetten de paal op de kaart, rijders boeken een tijdslot.</li>
             <li><strong>De paaleigenaar bepaalt alles zelf</strong>: prijs per kWh, beschikbaarheid, welke boekingen worden geaccepteerd.</li>
             <li><strong>Boekingen én betalingen lopen via de Pluggo-app</strong> (iDEAL, creditcard, Apple/Google Pay). Uitbetaling op je IBAN.</li>
-            <li><strong>Werkt met vrijwel alle thuispalen</strong> waar jij zelf de app-beheerder van bent: Wallbox, Alfen, Easee, EVBox, Heidelberg, Ratio, Schneider, Tesla Wall Connector, en de meeste andere OCPP-palen. → <a href="./welke-laadpaal-werkt.html">Check in 3 vragen of jouw paal geschikt is</a>.</li>
-            <li><strong>Servicefee: €0,03/kWh per kant</strong> (paaleigenaar én rijder), dus €0,06/kWh totaal. Geen abonnement, geen verborgen kosten.</li>
-            <li><strong>Contactloos</strong>: rijder gebruikt zijn eigen Type 2-kabel, jij hoeft er niet bij te zijn. Achteraf vul je het werkelijk afgenomen kWh in.</li>
+            <li><strong>Werkt met alle thuispalen in vrij-laden modus</strong> — Wallbox, Alfen, Easee, EVBox, Heidelberg, Ratio, Schneider, Tesla en meer. Geen OCPP verplicht. <a href="./welke-laadpaal-werkt.html">Check jouw paal in 3 vragen</a>.</li>
+            <li><strong>Servicefee: €0,03/kWh per kant</strong> — geen abonnement, geen verborgen kosten.</li>
+            <li><strong>Contactloos</strong>: rijder gebruikt eigen Type 2-kabel, jij hoeft er niet bij te zijn. Achteraf vul je het kWh in.</li>
           </ul>
         </div>
         <div class="card niet-card">
@@ -1436,7 +1439,7 @@
       <div class="eyebrow">Slimme paal</div>
       <h2>Jouw laadpaal, <span class="highlight">volledig in jouw handen.</span></h2>
       <p class="section-lead">
-        Heb je een OCPP-laadpaal? Koppel hem eenmalig in de app en Pluggo neemt het beheer over — van boeking tot afrekening, met live inzicht terwijl er geladen wordt.
+        Heb je een OCPP-laadpaal? Koppel hem eenmalig en Pluggo is je <strong>gratis backoffice</strong> — eigen sessies starten en bijhouden, live dashboard tijdens het laden, automatische facturatie bij verhuur, en ERE-registratie. Geen maandabonnement.
       </p>
 
       <div class="smart-paal-intro">
@@ -1448,6 +1451,20 @@
       </div>
 
       <div class="feature-list">
+        <div class="feature-card">
+          <span class="new-pill">Nieuw</span>
+          <span class="f-icon">⚡</span>
+          <h3>Eigen sessies starten</h3>
+          <p>Start je eigen laadsessie vanuit de app — apart bijgehouden van verhuursessies. Zie precies wat je zelf hebt geladen versus wat buren hebben afgenomen, per maand overzichtelijk opgesplitst.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="new-pill">Nieuw</span>
+          <span class="f-icon">🪪</span>
+          <h3>Rijdersidentificatie</h3>
+          <p>Iedere rijder die via Pluggo boekt is gekoppeld aan een geverifieerd account. Je weet altijd wie er op je oprit staat — naam, sessiehistorie en betalingsstatus — zonder moeite.</p>
+        </div>
+
         <div class="feature-card">
           <span class="new-pill">Nieuw</span>
           <span class="f-icon">📊</span>
@@ -1489,6 +1506,10 @@
           <p>Rijders zien in één oogopslag welke palen OCPP-gekoppeld zijn. Een smart-badge geeft aan dat de sessie automatisch wordt gestart — geen handmatig contact nodig met de eigenaar.</p>
         </div>
       </div>
+
+      <p style="margin-top: 28px; font-size: 16px;">
+        → <a href="./slimme-laadpaal-backoffice.html"><strong>Alles over de gratis backoffice: eigen sessies, ERE, push en facturatie</strong></a>
+      </p>
     </div>
   </section>
 
@@ -1718,14 +1739,24 @@
       </details>
 
       <details>
+        <summary>Kan ik Pluggo ook gebruiken om mijn eigen laadsessies bij te houden?</summary>
+        <p>Ja — en dat is gratis. Met een OCPP-gekoppelde paal start je eigen sessies direct vanuit de Pluggo-app. Je ziet een live dashboard (kWh, kW, duur), en in het maandoverzicht staan je eigen sessies apart van verhuursessies. Je hoeft de paal niet beschikbaar te stellen voor buren om hiervan te profiteren.</p>
+        <p>Pluggo houdt ook automatisch je ERE-totaal bij (kWh via een MID-gecertificeerde meter) en stelt de maandcijfers beschikbaar voor je ERE-aanvraag bij de energieleverancier.</p>
+        <p>→ <a href="./slimme-laadpaal-backoffice.html">Lees alles over de gratis backoffice — eigen sessies, ERE, push meldingen en automatische facturatie</a></p>
+      </details>
+
+      <details>
         <summary>Ik heb een slimme paal met OCPP — kan ik die koppelen?</summary>
-        <p>Ja. Als je paal OCPP 1.6J ondersteunt (dat geldt voor de meeste moderne Alfen-, Wallbox-, Easee- en EVBox-modellen), kun je hem rechtstreeks aan Pluggo koppelen voor een aantal extra voordelen:</p>
+        <p>Ja. Als je paal OCPP 1.6J ondersteunt (dat geldt voor de meeste moderne Alfen-, Wallbox-, Easee- en EVBox-modellen), koppel je hem eenmalig als gratis backoffice. Je krijgt daarmee toegang tot:</p>
         <ul>
-          <li><strong>Live laadtegel:</strong> terwijl een boeker aan het laden is, zie jij in je dashboard in real-time het aantal kWh, het huidige vermogen en de laadduur. Na afloop vult Pluggo het kWh-verbruik automatisch in.</li>
-          <li><strong>Remote starten en stoppen:</strong> een laadsessie starten of stoppen op afstand, zonder fysiek bij de paal te zijn.</li>
+          <li><strong>Eigen sessies starten:</strong> start je eigen laadsessie vanuit de app, los bijgehouden van verhuursessies.</li>
+          <li><strong>Live laadtegel:</strong> real-time kWh, huidig laadvermogen (kW) en laadduur — zowel bij eigen sessies als bij boekingen van rijders.</li>
+          <li><strong>Rijdersidentificatie:</strong> iedere rijder is gekoppeld aan een geverifieerd Pluggo-account. Je weet altijd wie er laadt.</li>
+          <li><strong>Remote starten en stoppen:</strong> start of stop een sessie op afstand zonder bij de paal te zijn.</li>
           <li><strong>Online/offline status:</strong> je ziet direct in je dashboard of je paal verbonden is.</li>
+          <li><strong>ERE-registratie:</strong> automatisch kWh-totaal per maand voor je ERE-aanvraag bij de energieleverancier.</li>
         </ul>
-        <p>Koppelen doe je via <strong>Profiel → Mijn laadpalen → Slimme paal koppelen</strong> in de app. De wizard legt stap voor stap uit hoe je de Pluggo-URL in de instellingen van jouw paal invoert. Bij de meeste merken duurt het minder dan vijf minuten. Hulp nodig? Mail <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a>.</p>
+        <p>Koppelen doe je via <strong>Mijn paal → Slimme paal koppelen</strong> in de app. De wizard legt per merk stap voor stap uit hoe je de Pluggo-URL invoert. Bij de meeste merken gekoppeld in minder dan 8 minuten. Hulp nodig? Mail <a href="mailto:info@pluggoapp.nl">info@pluggoapp.nl</a>.</p>
       </details>
 
       <details>
