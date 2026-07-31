@@ -1237,7 +1237,7 @@
             <li><strong>Boekingen én betalingen lopen via de Pluggo-app</strong> (iDEAL, creditcard, Apple/Google Pay). Uitbetaling op je IBAN.</li>
             <li><strong>Werkt met alle thuispalen in vrij-laden modus</strong> — Wallbox, Alfen, Easee, EVBox, Heidelberg, Ratio, Schneider, Tesla en meer. Geen OCPP verplicht. <a href="./welke-laadpaal-werkt.html">Check jouw paal in 3 vragen</a>.</li>
             <li><strong>Servicefee: €0,03/kWh per kant</strong> — geen abonnement, geen verborgen kosten.</li>
-            <li><strong>Contactloos</strong>: rijder gebruikt eigen Type 2-kabel, jij hoeft er niet bij te zijn. Achteraf vul je het kWh in.</li>
+            <li><strong>Contactloos</strong>: rijder gebruikt eigen Type 2-kabel, jij hoeft er niet bij te zijn. Achteraf vul je het kWh in — met een OCPP-koppeling gaat dit automatisch.</li>
           </ul>
         </div>
         <div class="card niet-card">
@@ -1247,7 +1247,7 @@
             <li><strong>Geen publiek laadnetwerk.</strong> Wij zijn geen Allego, Vattenfall of Fastned. We hebben zelf geen palen — we ontsluiten die van jou en je buren.</li>
             <li><strong>Geen paal-verkoper of installateur.</strong> Je moet zelf al een thuislaadpaal hebben (of iemand in de buurt kennen die er een heeft) om mee te doen.</li>
             <li><strong>Geen snellaadstation.</strong> Thuispalen laden via wisselstroom (Mode 3, Type 2), gemiddeld 11–22 kW — geen 150+ kW DC-snelladen zoals langs de snelweg.</li>
-            <li><strong>Geen automatische afrekening per aansluiting.</strong> De paaleigenaar vult ná de sessie het werkelijk geladen kWh in. Pas dán volgt een betaalverzoek.</li>
+            <li><strong>Geen automatische afrekening zonder OCPP.</strong> Zonder OCPP-koppeling vult de eigenaar het kWh handmatig in ná de sessie — met OCPP-koppeling gaat de afrekening wél automatisch.</li>
           </ul>
         </div>
       </div>
@@ -1394,7 +1394,7 @@
             <div class="step-num">4</div>
             <div class="step-body">
               <strong>Sluit af & krijg betaald</strong>
-              <span>Vul na de sessie het werkelijk afgenomen kWh in (afleesbaar op je paal of in je energie-app). Pluggo verstuurt automatisch een betaalverzoek en jouw uitbetaling landt binnen 1–3 werkdagen op je IBAN.</span>
+              <span>Vul na de sessie het werkelijk afgenomen kWh in (afleesbaar op je paal of in je energie-app) — of koppel je OCPP-paal en laat Pluggo dit automatisch bijhouden. Vergeten? Na 2 uur sturen we een herinnering. Pluggo verstuurt automatisch een betaalverzoek en jouw uitbetaling landt binnen 1–3 werkdagen op je IBAN.</span>
             </div>
           </div>
         </div>
@@ -1477,13 +1477,6 @@
           <span class="f-icon">🔔</span>
           <h3>Push als je tijdslot bijna verloopt</h3>
           <p>15 minuten voor het einde van een boeking krijg je een pushbericht: "Je tijdslot verloopt bijna." Zo staat je oprit altijd op tijd leeg — zonder dat je de klok in de gaten hoeft te houden.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="new-pill">Nieuw</span>
-          <span class="f-icon">⏰</span>
-          <h3>Herinnering om kWh in te vullen</h3>
-          <p>Vergeten het verbruik in te voeren na een sessie? Na 2 uur krijg je automatisch een push. De boeker kan pas definitief afrekenen als jij het verbruik invult — de herinnering houdt dat vlot.</p>
         </div>
 
         <div class="feature-card">
